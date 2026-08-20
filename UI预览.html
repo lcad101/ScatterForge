@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excel 散点图生成器 - UI 预览原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --accent: #2563eb; --accent-dark: #1d4ed8;
+    --bg: #f2f4f8; --panel: #ffffff; --border: #e2e6ee;
+    --text: #1f2430; --text-sub: #6b7280; --text-faint: #9ca3af;
+    --green: #16a34a; --red: #dc2626; --gray: #9ca3af;
+    --header: #1e3a5f; --radius: 8px;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13px;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  /* ---------- 顶部标题栏 ---------- */
+  .header {
+    background: var(--header); color: #fff; height: 46px; flex: 0 0 46px;
+    display: flex; align-items: center; padding: 0 14px; gap: 6px;
+  }
+  .header .logo { font-size: 20px; }
+  .header .title { font-size: 15px; font-weight: 600; letter-spacing: .5px; white-space: nowrap; }
+  .header .ver { font-size: 11px; opacity: .75; margin-top: 2px; white-space: nowrap; }
+  .menu { display: flex; gap: 2px; margin-left: 22px; }
+  .menu span {
+    padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  }
+  .menu span:hover { background: rgba(255,255,255,.14); }
+  .header .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .hbtn {
+    background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25);
+    border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; font-size: 12px;
+  }
+  .hbtn:hover { background: rgba(255,255,255,.22); }
+
+  /* ---------- 工具栏 ---------- */
+  .toolbar {
+    background: var(--panel); border-bottom: 1px solid var(--border); height: 44px;
+    flex: 0 0 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  }
+  .tbtn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border: 1px solid var(--border); background: #fff; border-radius: 6px;
+    cursor: pointer; font-size: 13px; color: var(--text); white-space: nowrap;
+  }
+  .tbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .tbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tbtn.primary:hover { background: var(--accent-dark); }
+  .tbtn:disabled { opacity: .45; cursor: not-allowed; }
+  .toolbar .spacer { flex: 1; }
+
+  /* ---------- 主体三栏 ---------- */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* 左：主题树 */
+  .left {
+    flex: 0 0 224px; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-head {
+    height: 36px; flex: 0 0 36px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px; border-bottom: 1px solid var(--border); font-weight: 600; color: var(--text-sub);
+    font-size: 12px;
+  }
+  .icon-btn {
+    border: none; background: transparent; cursor: pointer; color: var(--text-sub);
+    border-radius: 4px; width: 22px; height: 22px; font-size: 14px; line-height: 22px;
+  }
+  .icon-btn:hover { background: #eef2f9; color: var(--accent); }
+  .tree { flex: 1; overflow: auto; padding: 6px 4px; }
+  .t-node { font-weight: 600; padding: 5px 8px; color: var(--text-sub); font-size: 12.5px; cursor: default; display:flex; align-items:center; gap:5px; white-space: nowrap; }
+  .t-node .cnt { margin-left: auto; background: #eef1f6; border-radius: 9px; font-size: 11px; padding: 0 6px; color: var(--text-sub); }
+  .t-item {
+    padding: 6px 10px 6px 24px; border-radius: 6px; margin: 1px 2px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .t-item:hover { background: #f0f4fb; }
+  .t-item.sel { background: #e3ecfd; }
+  .t-item .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+  .t-item .nm { overflow: hidden; text-overflow: ellipsis; }
+  .t-item.miss .nm { color: var(--gray); }
+  .t-empty { padding: 10px 8px 10px 26px; color: var(--text-faint); font-size: 12px; }
+
+  /* 中：项目列表 */
+  .mid {
+    flex: 0 0 318px; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .search { padding: 8px 10px 6px; }
+  .search input {
+    width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12.5px; outline: none;
+  }
+  .search input:focus { border-color: var(--accent); }
+  .card-list { flex: 1; overflow: auto; padding: 4px 8px 10px; }
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; margin: 6px 0; cursor: pointer; position: relative;
+  }
+  .card:hover { border-color: #b9c8e8; box-shadow: 0 1px 4px rgba(30,58,95,.08); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card.miss { background: #f7f8fa; cursor: not-allowed; }
+  .card.miss .c-name { color: var(--gray); }
+  .c-top { display: flex; align-items: center; gap: 6px; }
+  .c-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .c-status { flex: 0 0 auto; font-size: 11px; padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
+  .c-status.ok { background: #e7f6ec; color: var(--green); }
+  .c-status.bad { background: #fdeaea; color: var(--red); }
+  .c-path { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .c-meta { font-size: 11.5px; color: var(--text-sub); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .mini {
+    font-size: 11.5px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--border);
+    background: #fff; cursor: pointer; white-space: nowrap;
+  }
+  .mini:hover { border-color: var(--accent); color: var(--accent); }
+  .mini.danger:hover { border-color: var(--red); color: var(--red); }
+  .mini.dark { background: var(--header); border-color: var(--header); color: #fff; }
+  .card.miss .mini { border-color: #d4d8df; color: var(--text-sub); }
+  .card.miss .mini:hover { border-color: var(--accent); color: var(--accent); }
+  .edit-hint { font-size: 11px; color: var(--text-faint); margin-top: 7px; }
+
+  /* 右：工作区 */
+  .right { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .tabs { height: 40px; flex: 0 0 40px; display: flex; align-items: flex-end; gap: 2px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 8px 16px; cursor: pointer; font-size: 13px; color: var(--text-sub);
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover { color: var(--accent); }
+  .tab.act { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .work { flex: 1; overflow: auto; padding: 14px 16px; min-height: 0; }
+  .page { display: none; }
+  .page.act { display: block; }
+
+  /* 表单 */
+  .fgroup { margin-bottom: 14px; }
+  .flabel { font-size: 12.5px; color: var(--text-sub); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
+  .flabel b { color: var(--text); }
+  .hint { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; line-height: 1.5; }
+  .hint.warn { color: #b45309; }
+  .filebox { display: flex; gap: 8px; }
+  .filebox .fn {
+    flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    background: #f8fafc; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+  }
+  .row2 { display: flex; gap: 12px; }
+  .row2 .fgroup { flex: 1; min-width: 0; }
+  input[type=number], input[type=text] {
+    width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: #c3c8d2; }
+  .note {
+    background: #fff8e6; border: 1px solid #f3dfa8; border-radius: 6px; padding: 8px 10px;
+    font-size: 12px; color: #8a6d1a; line-height: 1.6;
+  }
+  .note.blue { background: #eef4ff; border-color: #c6d8ff; color: #2b4f9e; }
+
+  /* 系列配置 */
+  .srow {
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; background: #fff;
+  }
+  .srow-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .srow-head input { flex: 1; min-width: 0; }
+  .srow-body { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cell { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+  .cell input { width: 64px; }
+  .swatch {
+    width: 22px; height: 22px; border-radius: 5px; border: 2px solid #fff; cursor: pointer;
+    box-shadow: 0 0 0 1px var(--border); position: relative; flex: 0 0 22px;
+  }
+  .swatch.sel { box-shadow: 0 0 0 2px var(--accent); }
+  .shape-btn {
+    width: 26px; height: 26px; border: 1px solid var(--border); background: #fff; border-radius: 5px;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: #4b5563;
+  }
+  .shape-btn.sel { border-color: var(--accent); background: #eef4ff; color: var(--accent); }
+  .palette {
+    position: absolute; z-index: 50; background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.14); padding: 8px; display: none; width: 216px;
+  }
+  .palette.open { display: block; }
+  .palette .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+  .palette .sw { width: 100%; aspect-ratio: 1; border-radius: 4px; cursor: pointer; border: 1px solid rgba(0,0,0,.08); }
+  .palette .sw:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .palette .pname { font-size: 11px; color: var(--text-faint); margin-bottom: 6px; }
+
+  /* 图表选项 */
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+  .opt-item { min-width: 0; }
+  .opt-item .flabel { margin-bottom: 4px; }
+  .opt-item.full { grid-column: 1 / -1; }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap; }
+
+  /* 预览 */
+  .preview-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .preview-head .info { font-size: 12.5px; color: var(--text-sub); white-space: nowrap; }
+  .banner {
+    background: #fff3e0; border: 1px solid #f5d9a8; color: #8a5a12; font-size: 12px;
+    border-radius: 6px; padding: 7px 10px; margin-bottom: 8px; display: none;
+  }
+  .banner.show { display: block; }
+  .canvas-wrap {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px; position: relative;
+  }
+  #chart { width: 100%; height: 400px; display: block; }
+  .legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+  .lg-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+  .lg-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
+  .tip {
+    position: absolute; background: rgba(30,41,59,.92); color: #fff; font-size: 11.5px;
+    padding: 5px 9px; border-radius: 5px; pointer-events: none; display: none; white-space: nowrap; z-index: 20;
+  }
+
+  /* 底部状态栏 */
+  .statusbar {
+    height: 26px; flex: 0 0 26px; background: #eef1f6; border-top: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; color: var(--text-sub); gap: 16px;
+  }
+  .statusbar .right { margin-left: auto; display: flex; gap: 16px; }
+
+  /* ---------- 模态框 ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
+    display: none; align-items: center; justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 10px; width: 460px; max-width: 92vw;
+    box-shadow: 0 18px 50px rgba(0,0,0,.25); overflow: hidden;
+  }
+  .modal-head {
+    background: var(--header); color: #fff; padding: 12px 16px; font-size: 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .modal-body { padding: 16px; font-size: 13px; line-height: 1.7; color: var(--text); max-height: 60vh; overflow: auto; }
+  .modal-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+  .mbtn {
+    padding: 7px 18px; border-radius: 6px; border: 1px solid var(--border); background: #fff;
+    font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .mbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .mbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mbtn.primary:hover { background: var(--accent-dark); color: #fff; }
+  .mbtn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .mbtn.danger:hover { background: #b91c1c; color: #fff; }
+  .modal .frow { margin-bottom: 12px; }
+  .modal .flabel { margin-bottom: 4px; }
+  .pathrow { display: flex; gap: 8px; }
+  .progress-wrap { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
+  .progress {
+    flex: 1; height: 10px; background: #e5e9f0; border-radius: 5px; overflow: hidden; min-width: 0;
+  }
+  .progress .bar { height: 100%; width: 0%; background: var(--accent); border-radius: 5px; transition: width .12s linear; }
+  .pct { font-size: 12px; color: var(--text-sub); width: 38px; text-align: right; white-space: nowrap; }
+
+  /* Toast */
+  .toast-wrap { position: fixed; top: 14px; right: 14px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    background: #1f2937; color: #fff; padding: 9px 14px; border-radius: 7px; font-size: 12.5px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.2); animation: tin .22s ease-out; max-width: 340px;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .toast.ok { background: #166534; }
+  .toast.warn { background: #92400e; }
+  .toast.err { background: #991b1b; }
+  @keyframes tin { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* 右键菜单 */
+  .ctx {
+    position: fixed; background: #fff; border: 1px solid var(--border); border-radius: 7px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.16); padding: 4px; z-index: 90; display: none; min-width: 150px;
+  }
+  .ctx div { padding: 7px 12px; border-radius: 5px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+  .ctx div:hover { background: #eef4ff; color: var(--accent); }
+  .ctx div.danger:hover { background: #fdeaea; color: var(--red); }
+  .ctx hr { border: none; border-top: 1px solid var(--border); margin: 3px 6px; }
+</style>
+</head>
+<body>
+
+<!-- ============ 顶部 ============ -->
+<div class="header">
+  <span class="logo">📊</span>
+  <span class="title">Excel 散点图生成器</span>
+  <span class="ver">v0.1 预览原型</span>
+  <div class="menu">
+    <span>文件</span><span>编辑</span><span>视图</span><span>帮助</span>
+  </div>
+  <div class="right">
+    <button class="hbtn" onclick="toast('已按最近修改时间排序','')">🕐 最近打开</button>
+    <button class="hbtn" onclick="toast('已打开数据文件夹','')">📂 打开数据文件夹</button>
+  </div>
+</div>
+
+<!-- ============ 工具栏 ============ -->
+<div class="toolbar">
+  <button class="tbtn" onclick="toast('请先在右侧「数据设置」页选择原始 Excel','warn')">📥 导入原始数据</button>
+  <button class="tbtn primary" onclick="openExport()">📈 导出图表</button>
+  <button class="tbtn" onclick="toast('批量导出：每个图表生成独立文件（同一主题打包为文件夹）','')">📦 批量导出</button>
+  <button class="tbtn" onclick="refreshStatus()">🔄 刷新状态</button>
+  <div class="spacer"></div>
+  <span style="color:var(--text-faint);font-size:12px;white-space:nowrap;">当前项目：</span>
+  <b id="curName" style="font-size:12.5px;white-space:nowrap;">销售分析_散点图</b>
+</div>
+
+<!-- ============ 主体 ============ -->
+<div class="body">
+
+  <!-- 左：主题树 -->
+  <div class="left">
+    <div class="panel-head"><span>📁 主题分组</span><button class="icon-btn" title="新建主题" onclick="toast('新建主题（原型演示）','')">＋</button></div>
+    <div class="tree" id="tree"></div>
+  </div>
+
+  <!-- 中：项目列表 -->
+  <div class="mid">
+    <div class="panel-head"><span>📋 图表项目</span><span id="listStat" style="font-weight:400;font-size:11.5px;color:var(--text-faint);"></span></div>
+    <div class="search"><input id="search" type="text" placeholder="🔍 搜索项目名称或路径…" oninput="renderCards()"></div>
+    <div class="card-list" id="cardList"></div>
+  </div>
+
+  <!-- 右：工作区 -->
+  <div class="right">
+    <div class="tabs">
+      <div class="tab act" data-tab="data" onclick="switchTab('data')">数据设置</div>
+      <div class="tab" data-tab="series" onclick="switchTab('series')">系列配置</div>
+      <div class="tab" data-tab="options" onclick="switchTab('options')">图表选项</div>
+      <div class="tab" data-tab="preview" onclick="switchTab('preview')">图表预览</div>
+    </div>
+
+    <div class="work">
+      <!-- 数据设置 -->
+      <div class="page act" id="page-data">
+        <div class="fgroup">
+          <div class="flabel"><b>原始数据文件</b>（一次性数据源，解析后不保存引用）</div>
+          <div class="filebox">
+            <div class="fn" id="srcFileName" title="D:\data\销售数据2026.xlsx">D:\data\销售数据2026.xlsx</div>
+            <button class="tbtn" onclick="toast('打开文件选择器（原型演示）','')">📂 选择…</button>
+          </div>
+          <div class="hint">仅作为数据来源读取，系统不会修改、不会保存该文件的路径与内容。</div>
+        </div>
+
+        <div class="row2">
+          <div class="fgroup">
+            <div class="flabel"><b>起始行</b></div>
+            <input type="number" min="1" value="1" id="startRow">
+            <div class="hint">默认 1（表头所在行）</div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel"><b>结束行</b>（可留空）</div>
+            <input type="text" placeholder="留空 = 仅取一行" id="endRow">
+            <div class="hint">文件总行数：<b id="maxRow">12,358</b></div>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div class="fgroup">
+            <div class="flabel"><b>起始列</b>（字母 A~ZZZ）</div>
+            <input type="text" value="A" id="startCol" maxlength="3" style="text-transform:uppercase;">
+            <div class="hint">输入列字母，如 A、AA、ZZZ</div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel"><b>结束列</b>（可留空）</div>
+            <input type="text" placeholder="留空 = 仅取一列" id="endCol" maxlength="3" style="text-transform:uppercase;">
+            <div class="hint">结束列 ≤ 起始列时仅取一列</div>
+          </div>
+        </div>
+
+        <div class="fgroup">
+          <div class="note">💡 <b>预览降采样契约</b>：若切片数据 &gt; 5,000 行，预览仅展示前 5,000 点；<b>导出时仍写入全部行数</b>，不会丢失数据。</div>
+        </div>
+
+        <button class="tbtn primary" onclick="switchTab('series'); toast('数据范围已应用（原型演示）','ok')">✅ 应用范围并配置系列</button>
+      </div>
+
+      <!-- 系列配置 -->
+      <div class="page" id="page-series">
+        <div id="seriesList"></div>
+        <button class="tbtn" onclick="addSeries()">＋ 添加系列</button>
+        <div style="margin-top:8px;"><button class="tbtn primary" onclick="openExport()">📈 下一步：导出图表</button></div>
+      </div>
+
+      <!-- 图表选项 -->
+      <div class="page" id="page-options">
+        <div class="opt-grid">
+          <div class="opt-item full">
+            <div class="flabel">图表标题</div>
+            <input type="text" id="optTitle" value="销售分析散点图">
+          </div>
+          <div class="opt-item">
+            <div class="flabel">X 轴标签</div>
+            <input type="text" id="optX" value="时间（月）">
+          </div>
+          <div class="opt-item">
+            <div class="flabel">Y 轴标签</div>
+            <input type="text" id="optY" value="销售额（万元）">
+          </div>
+          <div class="opt-item">
+            <div class="flabel">X 轴范围</div>
+            <div class="row2"><input type="text" placeholder="自动" id="xMin"><input type="text" placeholder="自动" id="xMax"></div>
+          </div>
+          <div class="opt-item">
+            <div class="flabel">Y 轴范围</div>
+            <div class="row2"><input type="text" placeholder="自动" id="yMin"><input type="text" placeholder="自动" id="yMax"></div>
+          </div>
+          <div class="opt-item full">
+            <label class="check"><input type="checkbox" id="optGrid" checked> 显示网格线</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图表预览 -->
+      <div class="page" id="page-preview">
+        <div class="preview-head">
+          <span class="info" id="pvInfo">已加载 <b>1,200</b> 行数据 · 2 个系列</span>
+          <label class="check" style="font-size:12px;"><input type="checkbox" id="demoBig" onchange="toggleDemoBig()"> 演示降采样（模拟 6,000 行）</label>
+          <span style="flex:1"></span>
+          <button class="tbtn" onclick="redraw()">🔄 刷新预览</button>
+        </div>
+        <div class="banner" id="pvBanner">⚠️ 预览仅展示前 5,000 个数据点，<b>导出时将包含全部数据</b>（当前仅展示 5,000 / 6,000 点）。</div>
+        <div class="canvas-wrap">
+          <canvas id="chart"></canvas>
+          <div class="tip" id="tip"></div>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="hint" style="margin-top:8px;">提示：预览用于快速检查效果，实际图表由 openpyxl 在导出文件中生成原生散点图。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 状态栏 ============ -->
+<div class="statusbar">
+  <span>✅ 就绪</span>
+  <span>数据库：scatter_app.db（≤100MB 契约）</span>
+  <div class="right">
+    <span>项目 <b id="sbTotal">3</b> / 缺失 <b id="sbMiss">1</b></span>
+    <span>启动探活：异步进行中…</span>
+  </div>
+</div>
+
+<!-- ============ 导出模态 ============ -->
+<div class="overlay" id="ovExport">
+  <div class="modal">
+    <div class="modal-head">📈 导出图表</div>
+    <div class="modal-body">
+      <div class="frow">
+        <div class="flabel"><b>目标文件</b>（覆盖已存在文件前会自动备份）</div>
+        <div class="pathrow">
+          <input type="text" id="expPath" value="D:\data\销售分析_Scatter_20260817_153000.xlsx" readonly style="flex:1;min-width:0;">
+          <button class="mbtn" onclick="toast('浏览选择保存位置（原型演示）','')">浏览…</button>
+        </div>
+        <div class="hint">文件名规则：<code>原文件名_Scatter_{时间戳}.xlsx</code>（用户可自定义）</div>
+      </div>
+      <div class="frow">
+        <div class="flabel"><b>文件结构</b></div>
+        <div class="note blue" style="font-size:12px;">Sheet 1 = <code>raw data</code>（数据切片）· Sheet 2 = <code>Chart View</code>（原生散点图，绑定 raw data 列）</div>
+      </div>
+      <div class="frow">
+        <div class="flabel"><b>导出进度</b></div>
+        <div class="progress-wrap">
+          <div class="progress"><div class="bar" id="expBar"></div></div>
+          <span class="pct" id="expPct">0%</span>
+        </div>
+        <div class="hint" id="expHint">每处理 1,000 行检查一次取消请求；取消后自动回滚（删临时文件 / 恢复备份）。</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn" id="expCancel" onclick="cancelExport()">✖ 取消</button>
+      <button class="mbtn primary" id="expStart" onclick="startExport()">🚀 开始导出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 缺失文件模态 ============ -->
+<div class="overlay" id="ovMissing">
+  <div class="modal">
+    <div class="modal-head">⚠️ 数据文件不存在</div>
+    <div class="modal-body">
+      <p id="missText" style="margin-bottom:10px;"></p>
+      <div class="note" style="margin-bottom:4px;">说明：仅数据库记录失效，<b>磁盘文件不会被删除</b>。可选择「重新定位」新文件（需包含 <code>raw data</code> 页），或「删除」该图表项目记录。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn danger" onclick="closeOverlay('ovMissing'); toast('已删除图表项目记录（磁盘文件未触碰）','ok')">🗑️ 删除</button>
+      <button class="mbtn primary" onclick="closeOverlay('ovMissing'); toast('已校验：新文件包含 raw data 页，路径已更新','ok')">📂 重新定位…</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 通用确认模态 ============ -->
+<div class="overlay" id="ovConfirm">
+  <div class="modal">
+    <div class="modal-head">❓ 操作确认</div>
+    <div class="modal-body" id="confirmText">确定要执行该操作吗？</div>
+    <div class="modal-foot">
+      <button class="mbtn" onclick="closeOverlay('ovConfirm')">取消</button>
+      <button class="mbtn danger" id="confirmOk" onclick="closeOverlay('ovConfirm')">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<div class="ctx" id="ctx"></div>
+
+<script>
+/* ================= 数据模型（原型演示数据） ================= */
+const PALETTE = [
+  ["红色","#FF0000"],["深红","#C00000"],["橙色","#FFC000"],["金色","#FFD966"],
+  ["黄色","#FFFF00"],["亮绿","#92D050"],["绿色","#00B050"],["深绿","#006100"],
+  ["青色","#00B0F0"],["深蓝","#0070C0"],["蓝色","#0000FF"],["紫色","#7030A0"],
+  ["洋红","#FF00FF"],["粉色","#FF99CC"],["棕色","#A52A2A"],["黑色","#000000"]
+];
+const SHAPES = [
+  ["circle","●"],["diamond","◆"],["square","■"],["triangle","▲"]
+];
+
+const THEMES = [
+  { name: "我的图表项目", projects: [
+    { id:1, name:"销售分析_散点图", path:"D:\\data\\销售分析_Scatter_20260817_153000.xlsx", status:"ACTIVE",
+      src:"D:\\data\\销售数据2026.xlsx", maxRow:12358, title:"销售分析散点图", xLabel:"时间（月）", yLabel:"销售额（万元）",
+      series:[
+        { name:"销售额", xCol:"A", yCol:"C", color:"#FF0000", shape:"circle", size:8, rows:1200, seed:7, base:60, amp:22, freq:70, noise:6 },
+        { name:"利润率", xCol:"A", yCol:"D", color:"#0000FF", shape:"diamond", size:8, rows:1200, seed:99, base:38, amp:12, freq:95, noise:4 }
+      ]},
+    { id:2, name:"质量报告_散点图", path:"D:\\data\\report.xlsx", status:"MISSING", src:"", maxRow:0,
+      title:"质量报告散点图", xLabel:"批次", yLabel:"缺陷率（%）",
+      series:[{ name:"缺陷率", xCol:"A", yCol:"B", color:"#7030A0", shape:"square", size:8, rows:800, seed:21, base:5, amp:3, freq:50, noise:1.5 }] }
+  ]},
+  { name: "质量分析", projects: [
+    { id:3, name:"设备监控_散点图", path:"D:\\data\\设备监控_Scatter_20260816_102145.xlsx", status:"ACTIVE",
+      src:"D:\\data\\设备监控2026.xlsx", maxRow:150000, title:"设备监控散点图", xLabel:"时间（秒）", yLabel:"温度（℃）",
+      series:[
+        { name:"温度", xCol:"A", yCol:"B", color:"#00B050", shape:"circle", size:6, rows:6000, seed:5, base:70, amp:10, freq:200, noise:3 },
+        { name:"湿度", xCol:"A", yCol:"C", color:"#00B0F0", shape:"triangle", size:6, rows:6000, seed:42, base:55, amp:15, freq:150, noise:2.5 } ]
+    }]
+  },
+  { name: "财务报告", projects: [] }
+];
+
+let curProject = null;   // 当前选中项目
+let curTheme = null;     // 当前选中主题
+let bigDemo = false;     // 降采样演示
+
+/* ================= 随机数据生成（确定性） ================= */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; } }
+function genPoints(s){
+  const rnd = mulberry32(s.seed);
+  const n = bigDemo ? 6000 : s.rows;
+  const pts = [];
+  for(let i=0;i<n;i++){
+    const x = i;
+    const y = s.base + Math.sin(i/s.freq)*s.amp + (rnd()-0.5)*2*s.noise;
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+/* ================= 主题树 / 项目列表 ================= */
+function renderTree(){
+  const t = document.getElementById("tree"); t.innerHTML = "";
+  THEMES.forEach(th=>{
+    const node = document.createElement("div");
+    node.className = "t-node";
+    const miss = th.projects.filter(p=>p.status==="MISSING").length;
+    node.innerHTML = `📁 ${th.name}<span class="cnt">${th.projects.length}${miss?`/${miss}缺`:""}</span>`;
+    t.appendChild(node);
+    th.projects.forEach(p=>{
+      const it = document.createElement("div");
+      it.className = "t-item" + (p.status==="MISSING"?" miss":"") + (p===curProject?" sel":"");
+      it.innerHTML = `<span class="dot" style="background:${p.status==="ACTIVE"?"#16a34a":"#c3c8d2"}"></span><span class="nm">${p.name}</span>`;
+      it.onclick = ()=>{ curTheme=th; curProject=p; renderTree(); renderCards(); loadProject(); };
+      t.appendChild(it);
+    });
+    if(!th.projects.length){ const e=document.createElement("div"); e.className="t-empty"; e.textContent="（暂无项目）"; t.appendChild(e); }
+  });
+}
+
+function renderCards(){
+  const q = (document.getElementById("search").value||"").toLowerCase();
+  const list = document.getElementById("cardList"); list.innerHTML = "";
+  let total=0, miss=0;
+  THEMES.forEach(th=>{ if(curTheme && th!==curTheme) return; th.projects.forEach(p=>{
+    total++; if(p.status==="MISSING") miss++;
+    if(q && !(p.name.toLowerCase().includes(q)||p.path.toLowerCase().includes(q))) return;
+    const card = document.createElement("div");
+    card.className = "card" + (p.status==="MISSING"?" miss":"") + (p===curProject?" sel":"");
+    const meta = p.status==="ACTIVE"
+      ? `✅ 正常 · ${p.series.length} 个系列 · ${(p.series[0]?.rows || 0).toLocaleString()} 行`
+      : `❌ 文件缺失 · 路径已失效`;
+    card.innerHTML = `
+      <div class="c-top">
+        <span class="c-name" title="${p.name}">${p.status==="MISSING"?"🔴":"🟢"} ${p.name}</span>
+        <span class="c-status ${p.status==="ACTIVE"?"ok":"bad"}">${p.status==="ACTIVE"?"✅ 正常":"❌ 缺失"}</span>
+      </div>
+      <div class="c-path" title="${p.path}">路径：${p.path}</div>
+      <div class="c-meta">${meta}</div>
+      <div class="c-actions">
+        ${p.status==="ACTIVE"
+          ? `<button class="mini dark" onclick="event.stopPropagation();loadProject();switchTab('preview')">✏️ 编辑</button>
+             <button class="mini" onclick="event.stopPropagation();openFolder('${p.path}')">📂 打开文件夹</button>
+             <button class="mini danger" onclick="event.stopPropagation();confirmDelete('${p.name}')">🗑️ 删除</button>`
+          : `<button class="mini" onclick="event.stopPropagation();openMissing('${p.name}','${p.path}')">📂 重新定位</button>
+             <button class="mini" onclick="event.stopPropagation();confirmDelete('${p.name}')">🗑️ 删除</button>`}
+      </div>
+      ${p.status==="ACTIVE"?'<div class="edit-hint">双击或点击「编辑」进入编辑</div>':''}`;
+    card.onclick = ()=>{ if(p.status!=="MISSING"){ curProject=p; renderTree(); renderCards(); loadProject(); } };
+    card.oncontextmenu = (e)=>{ e.preventDefault(); showCtx(e, p); };
+    list.appendChild(card);
+  });});
+  document.getElementById("listStat").textContent = `（${total} 个，其中 ${miss} 个缺失）`;
+  document.getElementById("sbTotal").textContent = total;
+  document.getElementById("sbMiss").textContent = miss;
+}
+
+function showCtx(e, p){
+  const c = document.getElementById("ctx");
+  c.innerHTML = "";
+  const items = p.status==="ACTIVE"
+    ? [["✏️ 编辑",()=>{curProject=p;renderTree();renderCards();loadProject();switchTab('preview');}],
+       ["📂 打开所在文件夹",()=>openFolder(p.path)],["|"],
+       ["🗑️ 删除项目记录",()=>confirmDelete(p.name)]]
+    : [["📂 重新定位",()=>openMissing(p.name,p.path)],["|"],["🗑️ 删除项目记录",()=>confirmDelete(p.name)]];
+  items.forEach(it=>{
+    if(it[0]==="|"){ const hr=document.createElement("hr"); c.appendChild(hr); return; }
+    const d = document.createElement("div");
+    d.textContent = it[0];
+    if(it[0].includes("删除")) d.className="danger";
+    d.onclick = ()=>{ c.style.display="none"; it[1](); };
+    c.appendChild(d);
+  });
+  c.style.display="block";
+  const w=c.offsetWidth,h=c.offsetHeight;
+  c.style.left=Math.min(e.clientX, innerWidth-w-8)+"px";
+  c.style.top=Math.min(e.clientY, innerHeight-h-8)+"px";
+}
+document.addEventListener("click", ()=>document.getElementById("ctx").style.display="none");
+
+/* ================= 加载项目到右侧 ================= */
+function loadProject(){
+  if(!curProject) return;
+  document.getElementById("curName").textContent = curProject.name;
+  document.getElementById("srcFileName").textContent = curProject.src || "（无原始文件，从 raw data 页读取）";
+  document.getElementById("srcFileName").title = curProject.src || "";
+  document.getElementById("maxRow").textContent = (curProject.maxRow||0).toLocaleString();
+  document.getElementById("optTitle").value = curProject.title;
+  document.getElementById("optX").value = curProject.xLabel;
+  document.getElementById("optY").value = curProject.yLabel;
+  renderSeries();
+  redraw();
+}
+
+/* ================= 系列配置 ================= */
+function renderSeries(){
+  const box = document.getElementById("seriesList"); box.innerHTML = "";
+  curProject.series.forEach((s, idx)=>{
+    const row = document.createElement("div");
+    row.className = "srow";
+    row.innerHTML = `
+      <div class="srow-head">
+        <span style="color:var(--text-faint);font-size:12px;white-space:nowrap;">系列 ${idx+1}</span>
+        <input type="text" value="${s.name}" onchange="curProject.series[${idx}].name=this.value;redraw()">
+        <button class="icon-btn" title="删除系列" onclick="removeSeries(${idx})">🗑</button>
+      </div>
+      <div class="srow-body">
+        <span class="cell">X 列 <input type="text" value="${s.xCol}" maxlength="3" style="text-transform:uppercase;" onchange="curProject.series[${idx}].xCol=this.value.toUpperCase()"></span>
+        <span class="cell">Y 列 <input type="text" value="${s.yCol}" maxlength="3" style="text-transform:uppercase;" onchange="curProject.series[${idx}].yCol=this.value.toUpperCase()"></span>
+        <span class="cell">颜色 <span class="swatch" style="background:${s.color}" data-s="${idx}" onclick="togglePalette(this,${idx})"></span></span>
+        <span class="cell">形状 ${SHAPES.map(sh=>`<button class="shape-btn ${s.shape===sh[0]?"sel":""}" title="${sh[0]}" onclick="setShape(${idx},'${sh[0]}')">${sh[1]}</button>`).join("")}</span>
+        <span class="cell">大小 <input type="number" min="3" max="20" value="${s.size}" style="width:56px;" onchange="curProject.series[${idx}].size=+this.value;redraw()"></span>
+      </div>
+      <div class="palette" id="pal-${idx}">
+        <div class="pname">仅 16 种标准色（禁止取色器/渐变色）</div>
+        <div class="grid">${PALETTE.map(c=>`<div class="sw" style="background:${c[1]}" title="${c[0]}" onclick="setColor(${idx},'${c[1]}')"></div>`).join("")}</div>
+      </div>`;
+    box.appendChild(row);
+  });
+}
+function addSeries(){
+  if(!curProject){ toast("请先选择项目","warn"); return; }
+  curProject.series.push({ name:`系列 ${curProject.series.length+1}`, xCol:"A", yCol:"E", color:"#00B050", shape:"circle", size:8, rows:curProject.series[0]?.rows||1200, seed:Math.floor(Math.random()*999)+1, base:50, amp:15, freq:80, noise:4 });
+  renderSeries(); redraw();
+  toast("已添加系列","ok");
+}
+function removeSeries(i){
+  curProject.series.splice(i,1); renderSeries(); redraw(); toast("已删除系列","ok");
+}
+function setShape(i, sh){ curProject.series[i].shape=sh; renderSeries(); redraw(); }
+function setColor(i, c){ curProject.series[i].color=c; renderSeries(); redraw(); }
+function togglePalette(el, i){
+  document.querySelectorAll(".palette.open").forEach(p=>p.classList.remove("open"));
+  el.parentElement.parentElement.querySelector(".palette").classList.toggle("open");
+  document.addEventListener("click", function h(e){ if(!e.target.closest(".palette")){ document.querySelectorAll(".palette.open").forEach(p=>p.classList.remove("open")); document.removeEventListener("click",h);} });
+}
+
+/* ================= 图表预览（Canvas 散点） ================= */
+function toggleDemoBig(){ bigDemo = document.getElementById("demoBig").checked; redraw(); }
+
+function redraw(){
+  if(!curProject) return;
+  const n = bigDemo ? 6000 : (curProject.series[0]?.rows || 1200);
+  document.getElementById("pvInfo").innerHTML = `已加载 <b>${n.toLocaleString()}</b> 行数据 · ${curProject.series.length} 个系列`;
+  const banner = document.getElementById("pvBanner");
+  if(n > 5000){ banner.classList.add("show"); banner.innerHTML = `⚠️ 预览仅展示前 5,000 个数据点，<b>导出时将包含全部数据</b>（当前仅展示 5,000 / ${n.toLocaleString()} 点）。`; }
+  else { banner.classList.remove("show"); }
+
+  // 图例
+  document.getElementById("legend").innerHTML = curProject.series.map(s=>
+    `<span class="lg-item"><span class="lg-dot" style="background:${s.color}"></span>${s.name}（X:${s.xCol} Y:${s.yCol} · ${SHAPES.find(x=>x[0]===s.shape)[1]} ${s.shape}）</span>`).join("");
+
+  drawChart();
+}
+
+function drawChart(){
+  const cv = document.getElementById("chart");
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = 400;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+
+  const pad = {l:52, r:16, t:14, b:34};
+  const iw = w-pad.l-pad.r, ih = h-pad.t-pad.b;
+
+  // 收集所有点
+  const all = [];
+  curProject.series.forEach(s=>{
+    const pts = genPoints(s).slice(0,5000);   // 降采样契约：最多 5000 点
+    pts.forEach(p=>all.push({x:p[0], y:p[1], s}));
+  });
+  if(!all.length) return;
+  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity;
+  all.forEach(p=>{ if(p.x<xMin)xMin=p.x; if(p.x>xMax)xMax=p.x; if(p.y<yMin)yMin=p.y; if(p.y>yMax)yMax=p.y; });
+  const xr = (xMax-xMin)||1, yr = (yMax-yMin)||1;
+  xMin-=xr*.02; xMax+=xr*.02; yMin-=yr*.06; yMax+=yr*.06;
+
+  const X = v=>pad.l+(v-xMin)/(xMax-xMin)*iw;
+  const Y = v=>pad.t+ih-(v-yMin)/(yMax-yMin)*ih;
+
+  // 网格与坐标轴
+  ctx.strokeStyle="#e8ebf1"; ctx.fillStyle="#9aa3b2"; ctx.font="11px sans-serif"; ctx.lineWidth=1;
+  const nGx=6, nGy=5;
+  for(let i=0;i<=nGx;i++){
+    const x=pad.l+iw*i/nGx, v=xMin+(xMax-xMin)*i/nGx;
+    ctx.beginPath(); ctx.moveTo(x,pad.t); ctx.lineTo(x,pad.t+ih); ctx.stroke();
+    ctx.textAlign="center"; ctx.fillText(v.toFixed(Math.abs(v)>=100?0:1), x, h-12);
+  }
+  for(let i=0;i<=nGy;i++){
+    const y=pad.t+ih*i/nGy, v=yMax-(yMax-yMin)*i/nGy;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+iw,y); ctx.stroke();
+    ctx.textAlign="right"; ctx.fillText(v.toFixed(1), pad.l-6, y+4);
+  }
+  ctx.strokeStyle="#c3c8d2";
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ih); ctx.lineTo(pad.l+iw,pad.t+ih); ctx.stroke();
+
+  // 轴标签
+  ctx.fillStyle="#6b7280";
+  ctx.textAlign="center"; ctx.fillText(curProject.xLabel||"X", pad.l+iw/2, h-2);
+  ctx.save(); ctx.translate(12,pad.t+ih/2); ctx.rotate(-Math.PI/2); ctx.fillText(curProject.yLabel||"Y", 0, 0); ctx.restore();
+
+  // 系列点
+  const ptData = [];
+  curProject.series.forEach(s=>{
+    const pts = genPoints(s).slice(0,5000);
+    pts.forEach(p=>ptData.push({sx:X(p[0]), sy:Y(p[1]), s}));
+  });
+  ptData.forEach(p=>drawMark(ctx, p.sx, p.sy, p.s));
+  cv._ptData = ptData; cv._hasTip = true;
+
+  // 标题
+  ctx.fillStyle="#1f2430"; ctx.font="600 13px sans-serif"; ctx.textAlign="left";
+  ctx.fillText(document.getElementById("optTitle").value||curProject.title, pad.l, 12);
+}
+
+function drawMark(ctx, x, y, s){
+  const r = Math.max(3, s.size/2);
+  ctx.fillStyle = s.color;
+  ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  switch(s.shape){
+    case "circle": ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); break;
+    case "square": ctx.fillRect(x-r,y-r,r*2,r*2); break;
+    case "diamond":
+      ctx.moveTo(x,y-r); ctx.lineTo(x+r,y); ctx.lineTo(x,y+r); ctx.lineTo(x-r,y); ctx.closePath(); ctx.fill(); break;
+    case "triangle":
+      ctx.moveTo(x,y-r); ctx.lineTo(x+r*1.1,y+r*.7); ctx.lineTo(x-r*1.1,y+r*.7); ctx.closePath(); ctx.fill(); break;
+  }
+  ctx.stroke();
+}
+
+/* 悬停提示 */
+const tip = document.getElementById("tip");
+document.getElementById("chart").addEventListener("mousemove", e=>{
+  const cv = document.getElementById("chart");
+  const data = cv._ptData||[];
+  let best=null, bd=Infinity;
+  const rect = cv.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  for(let i=0;i<data.length;i++){
+    const d=Math.hypot(data[i].sx-mx, data[i].sy-my);
+    if(d<bd && d<14){ bd=d; best=data[i]; }
+  }
+  if(best){
+    tip.style.display="block";
+    tip.style.left=(best.sx+10)+"px"; tip.style.top=(best.sy-10)+"px";
+    tip.textContent = `${best.s.name}：(${Math.round(best.sx)}, ${best.sy.toFixed(1)})`; // 演示坐标
+  } else tip.style.display="none";
+});
+document.getElementById("chart").addEventListener("mouseleave", ()=>tip.style.display="none");
+
+/* ================= 标签页 ================= */
+function switchTab(name){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("act", t.dataset.tab===name));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("act", p.id==="page-"+name));
+  if(name==="preview") redraw();
+}
+
+/* ================= 模态框 ================= */
+function openOverlay(id){ document.getElementById(id).classList.add("open"); }
+function closeOverlay(id){ document.getElementById(id).classList.remove("open"); }
+
+function openExport(){
+  document.getElementById("expBar").style.width="0%";
+  document.getElementById("expPct").textContent="0%";
+  document.getElementById("expStart").style.display="";
+  document.getElementById("expCancel").disabled=false;
+  openOverlay("ovExport");
+}
+
+function startExport(){
+  const bar=document.getElementById("expBar"), pct=document.getElementById("expPct");
+  document.getElementById("expStart").disabled=true;
+  const btn=document.getElementById("expCancel");
+  let prog=0;
+  clearInterval(window._expTimer);
+  window._expTimer=setInterval(()=>{
+    if(prog>=100){
+      clearInterval(window._expTimer);
+      closeOverlay("ovExport");
+      toast("导出完成：销售分析_Scatter_20260817_153000.xlsx（含 raw data + Chart View）","ok");
+      return;
+    }
+    prog+=Math.random()*7;
+    if(prog>100)prog=100;
+    bar.style.width=prog+"%"; pct.textContent=Math.floor(prog)+"%";
+  }, 90);
+}
+function cancelExport(){
+  clearInterval(window._expTimer);
+  const bar=document.getElementById("expBar"), pct=document.getElementById("expPct");
+  bar.style.width="0%"; pct.textContent="已取消";
+  document.getElementById("expStart").disabled=false;
+  document.getElementById("expCancel").disabled=true;
+  setTimeout(()=>{ closeOverlay("ovExport"); toast("已取消导出：正在回滚（删除临时文件 / 恢复备份）","warn"); }, 700);
+}
+
+function openMissing(name, path){
+  document.getElementById("missText").innerHTML =
+    `项目 <b>${name}</b> 的导出文件不存在：<br><code style="font-size:12px;word-break:break-all;">${path}</code>`;
+  openOverlay("ovMissing");
+}
+function confirmDelete(name){
+  document.getElementById("confirmText").innerHTML =
+    `确定要删除图表项目 <b>${name}</b> 吗？<br><span style="color:var(--text-sub);font-size:12px;">（仅删除数据库记录，磁盘文件不会被删除）</span>`;
+  document.getElementById("confirmOk").onclick = ()=>{ closeOverlay("ovConfirm"); toast(`已删除项目：${name}（磁盘文件未触碰）`,"ok"); };
+  openOverlay("ovConfirm");
+}
+function openFolder(path){
+  toast(`打开文件夹：${path.split("\\").slice(0,-1).join("\\")}`,"");
+}
+
+/* ================= Toast ================= */
+function toast(msg, kind){
+  const w = document.getElementById("toasts");
+  const t = document.createElement("div");
+  t.className = "toast" + (kind?(" "+kind):"");
+  t.textContent = msg;
+  w.appendChild(t);
+  setTimeout(()=>{ t.style.opacity="0"; t.style.transition="opacity .3s"; setTimeout(()=>t.remove(),300); }, 3200);
+}
+
+/* ================= 其他 ================= */
+function refreshStatus(){
+  toast("已重新探活全部项目路径… 2 个正常 / 1 个缺失","");
+  renderCards();
+}
+window.addEventListener("resize", ()=>{ if(document.getElementById("page-preview").classList.contains("act")) redraw(); });
+
+/* ================= 初始化 ================= */
+curTheme = THEMES[0];
+curProject = THEMES[0].projects[0];
+renderTree(); renderCards(); loadProject();
+
+/* 演示模式：?view=export 自动打开导出框；?view=missing 自动打开缺失框；?tab=preview 切到预览页 */
+const q = new URLSearchParams(location.search);
+if(q.get("view")==="export") setTimeout(openExport, 350);
+if(q.get("view")==="missing") setTimeout(()=>openMissing("质量报告_散点图","D:\\data\\report.xlsx"), 350);
+if(q.get("tab")) setTimeout(()=>switchTab(q.get("tab")), 100);
+</script>
+</body>
+</html>

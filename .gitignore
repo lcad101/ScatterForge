@@ -1,0 +1,26 @@
+# 依赖与虚拟环境
+.venv/
+venv/
+libs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 运行时数据
+data/
+*.db
+*.db-journal
+*.log
+
+# 导出/临时文件
+*.tmp
+*.backup_*
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
