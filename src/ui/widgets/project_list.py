@@ -1,45 +1,35 @@
-"""项目列表（支持 Ctrl/Shift 多选，冻结规范 2026-08-20 Q2）。
-
-MISSING 项目不可被选中。
-"""
+"""图表列表（v3.2）：显示当前项目下的图表，支持编辑/删除。"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 
-class ProjectListView(QListWidget):
-    projectActivated = Signal(int)   # 双击 / 回车
-    selectionChangedSig = Signal(int)  # 当前选中数量
+class ChartListWidget(QListWidget):
+    chartActivated = Signal(object)   # Chart（双击/点击编辑）
+    deleteRequested = Signal(object)  # Chart
+
+    ROLE_CHART = Qt.ItemDataRole.UserRole + 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.itemDoubleClicked.connect(self._on_double_click)
-        self.itemSelectionChanged.connect(self._on_selection)
+        self.itemDoubleClicked.connect(self._on_double)
 
-    def set_projects(self, projects: list) -> None:
-        """projects: list[dict(id, name, path, status)]"""
+    def set_charts(self, charts, sel_chart=None):
         self.clear()
-        for p in projects:
-            status_txt = "✅ 正常" if p["status"] == "ACTIVE" else "❌ 缺失"
-            text = f"{p['name']}\n{p['path']}\n{status_txt}"
-            item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, p["id"])
-            item.setData(Qt.ItemDataRole.UserRole + 1, p["status"])
-            item.setToolTip(p["path"])
-            if p["status"] != "ACTIVE":
-                # MISSING 不可选
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                item.setForeground(Qt.GlobalColor.gray)
+        for c in charts:
+            n = len(c.series_list)
+            item = QListWidgetItem(f"{c.chart_name}\n{n} 个系列 · X/Y 可编辑")
+            item.setData(self.ROLE_CHART, c)
+            if sel_chart is not None and sel_chart.id == c.id:
+                item.setSelected(True)
             self.addItem(item)
 
-    def selected_project_ids(self) -> list[int]:
-        return [it.data(Qt.ItemDataRole.UserRole) for it in self.selectedItems()]
+    def _on_double(self, item):
+        c = item.data(self.ROLE_CHART)
+        if c is not None:
+            self.chartActivated.emit(c)
 
-    def _on_double_click(self, item) -> None:
-        if item.data(Qt.ItemDataRole.UserRole + 1) == "ACTIVE":
-            self.projectActivated.emit(item.data(Qt.ItemDataRole.UserRole))
-
-    def _on_selection(self) -> None:
-        self.selectionChangedSig.emit(len(self.selectedItems()))
+    def selected_chart(self):
+        items = self.selectedItems()
+        return items[0].data(self.ROLE_CHART) if items else None

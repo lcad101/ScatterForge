@@ -1,9 +1,9 @@
-"""ECharts 图表预览（QWebEngineView）。
+"""ECharts 图表预览（QWebEngineView，v3.2）。
 
-冻结规范第 2/6/14 章：
-- 降采样契约：数据 > 5,000 行仅展示前 5,000 点，导出仍全量写入。
-- 缩放平移：启用 dataZoom（inside + slider）与 toolbox（缩放/复位/保存图片）。
-- 导出图片：支持 PNG / SVG（Q4）。
+- 每个系列按其行范围取数；>5000 点仅展示前 5000 点，导出全量。
+- 轴刻度：步长（interval）+ 最小网格步长（minorSplitLine，5 小格/大格）。
+- 散点连线（lineStyle）。
+- dataZoom + toolbox；导出 PNG/SVG。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import os
 from PySide6.QtCore import QEventLoop, QUrl, Signal
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from src.services.chart_builder import ChartOptions, SeriesConfig
+from src.services.chart_builder import ChartOptions, SeriesConfig, check_limit_rules
 from src.services.excel_handler import SheetSlice, numeric_series_points
 
 DOWN_SAMPLE_LIMIT = 5000
@@ -34,13 +34,18 @@ window.addEventListener('resize', function(){ chart.resize(); });
 </script></body></html>"""
 
 
+def _split_number(major, minor):
+    if major and minor:
+        return max(1, round(major / minor))
+    return 5
+
+
 class PreviewWidget(QWebEngineView):
-    renderReady = Signal(int)  # 渲染数据点数（降采样后）
+    renderReady = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._echarts_js = self._load_echarts()
-        self._data_rows = 0
 
     @staticmethod
     def _load_echarts() -> str:
@@ -49,26 +54,55 @@ class PreviewWidget(QWebEngineView):
                 return f.read()
         return ""
 
-    # ---------------- 渲染 ----------------
     def render(self, sl: SheetSlice, series_list: list[SeriesConfig], options: ChartOptions,
                banner_text: str = "") -> None:
         series_opts = []
         downsampled = False
         total_rows = sl.row_count
-        self._data_rows = total_rows
 
-        for cfg in series_list:
-            pts = numeric_series_points(sl, cfg.x_col, cfg.y_col)
+        visible_series = [s for s in series_list if getattr(s, "visible", True)]
+        for cfg in visible_series:
+            pts = numeric_series_points(sl, cfg.x_col, cfg.y_col, cfg.row_start, cfg.row_end)
             if len(pts) > DOWN_SAMPLE_LIMIT:
                 downsampled = True
                 pts = pts[:DOWN_SAMPLE_LIMIT]
+            data = [[x, y] for x, y in pts]
+            if options.connect_line:
+                sopt = {
+                    "name": cfg.name, "type": "line",
+                    "showSymbol": True, "symbol": cfg.shape, "symbolSize": cfg.size,
+                    "itemStyle": {"color": cfg.color},
+                    "lineStyle": {"width": 1.5, "color": cfg.color},
+                    "data": data,
+                }
+            else:
+                sopt = {
+                    "name": cfg.name, "type": "scatter",
+                    "symbol": cfg.shape, "symbolSize": cfg.size,
+                    "itemStyle": {"color": cfg.color},
+                    "data": data,
+                }
+            series_opts.append(sopt)
+
+        # 限值规则：画「允许区间」虚线框 + 标记超限点
+        rules = options.rules or []
+        for k, rule in enumerate(rules):
+            box = [[rule.x_start, rule.y_min], [rule.x_end, rule.y_min],
+                   [rule.x_end, rule.y_max], [rule.x_start, rule.y_max],
+                   [rule.x_start, rule.y_min]]
             series_opts.append({
-                "name": cfg.name,
-                "type": "scatter",
-                "symbol": cfg.shape,
-                "symbolSize": cfg.size,
-                "itemStyle": {"color": cfg.color},
-                "data": [[x, y] for x, y in pts],
+                "name": f"限值{k + 1}", "type": "line", "silent": True,
+                "showSymbol": False,
+                "lineStyle": {"color": "#d32f2f", "type": "dashed", "width": 1},
+                "data": box,
+            })
+        exceeded = check_limit_rules(sl, rules)
+        if exceeded:
+            series_opts.append({
+                "name": "超限点", "type": "scatter",
+                "symbol": "circle", "symbolSize": 9,
+                "itemStyle": {"color": "rgba(255,0,0,0.15)", "borderColor": "#d32f2f", "borderWidth": 2},
+                "data": [[p["x"], p["y"]] for p in exceeded],
             })
 
         x_axis = {"type": "value", "scale": True, "name": options.x_label or ""}
@@ -81,14 +115,23 @@ class PreviewWidget(QWebEngineView):
             y_axis["min"] = options.y_min
         if options.y_max is not None:
             y_axis["max"] = options.y_max
-        if not options.show_grid:
-            x_axis["splitLine"] = {"show": False}
-            y_axis["splitLine"] = {"show": False}
+        if options.x_major_unit is not None:
+            x_axis["interval"] = options.x_major_unit
+        if options.y_major_unit is not None:
+            y_axis["interval"] = options.y_major_unit
+        x_axis["splitLine"] = {"show": bool(options.show_grid)}
+        y_axis["splitLine"] = {"show": bool(options.show_grid)}
+        if options.x_minor_unit is not None:
+            x_axis["minorTick"] = {"show": True, "splitNumber": _split_number(options.x_major_unit, options.x_minor_unit)}
+            x_axis["minorSplitLine"] = {"show": True}
+        if options.y_minor_unit is not None:
+            y_axis["minorTick"] = {"show": True, "splitNumber": _split_number(options.y_major_unit, options.y_minor_unit)}
+            y_axis["minorSplitLine"] = {"show": True}
 
         option = {
             "title": {"text": options.title or "", "left": "center", "textStyle": {"fontSize": 14}},
             "tooltip": {"trigger": "item"},
-            "legend": {"data": [s.name for s in series_list], "bottom": 0},
+            "legend": {"data": [s.name for s in visible_series], "bottom": 0},
             "grid": {"left": 60, "right": 40, "top": 60, "bottom": 60},
             "xAxis": x_axis,
             "yAxis": y_axis,
@@ -105,8 +148,17 @@ class PreviewWidget(QWebEngineView):
         }
 
         banner = ""
+        if exceeded:
+            n_y = sum(1 for p in exceeded if p["kind"] == "Y")
+            n_x = sum(1 for p in exceeded if p["kind"] == "X")
+            banner += (
+                f'<div style="background:#fdecea;color:#b71c1c;border:1px solid #f5b8b8;'
+                f'padding:6px 10px;font-size:12px;border-radius:4px;margin:6px;">'
+                f'⚠️ 检测到 <b>{len(exceeded)}</b> 个超限点（X 超限 {n_x} 个 · Y 超限 {n_y} 个）'
+                f'，导出时超限单元格将标红</div>'
+            )
         if downsampled or banner_text:
-            banner = (
+            banner += (
                 f'<div style="background:#fff3e0;color:#8a5a12;border:1px solid #f5d9a8;'
                 f'padding:6px 10px;font-size:12px;border-radius:4px;margin:6px;">'
                 f'⚠️ 预览仅展示前 {DOWN_SAMPLE_LIMIT:,} 个数据点，<b>导出时将包含全部数据</b>'
@@ -135,10 +187,8 @@ class PreviewWidget(QWebEngineView):
         return result.get("v")
 
     def export_image(self, fmt: str, target_path: str, width: int, height: int) -> None:
-        """导出当前预览为 PNG 或 SVG。"""
         if not self._echarts_js:
             raise RuntimeError("ECharts 库未加载")
-
         if fmt.upper() == "PNG":
             chart_w = self._run_js("chart ? chart.getWidth() : 0") or 0
             ratio = max(1, round(width / chart_w)) if chart_w else 2

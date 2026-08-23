@@ -20,6 +20,10 @@ data/
 *.tmp
 *.backup_*
 
+# 用户机密测试数据（原始报表，不上传公开仓库）
+*LP G2*.xlsx
+*performace ESR3*.xlsx
+
 # 编辑器
 .idea/
 .vscode/

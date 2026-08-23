@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ScatterForge v3.2 — UI 预览原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --accent:#2563eb; --accent-dark:#1d4ed8; --bg:#f2f4f8; --panel:#fff; --border:#e2e6ee;
+    --text:#1f2430; --sub:#6b7280; --faint:#9ca3af; --green:#16a34a; --red:#dc2626;
+    --header:#1e3a5f; --radius:8px;
+  }
+  html,body{height:100%;}
+  body{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:13px;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+  .header{background:var(--header);color:#fff;height:46px;flex:0 0 46px;display:flex;align-items:center;padding:0 14px;gap:6px;}
+  .header .logo{font-size:20px;}
+  .header .title{font-size:15px;font-weight:600;white-space:nowrap;}
+  .header .ver{font-size:11px;opacity:.75;white-space:nowrap;}
+  .menu{display:flex;gap:2px;margin-left:22px;}
+  .menu span{padding:5px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;}
+  .menu span:hover{background:rgba(255,255,255,.14);}
+  .header .right{margin-left:auto;display:flex;gap:8px;}
+  .hbtn{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;padding:5px 12px;cursor:pointer;white-space:nowrap;font-size:12px;}
+  .hbtn:hover{background:rgba(255,255,255,.22);}
+  .toolbar{background:var(--panel);border-bottom:1px solid var(--border);height:44px;flex:0 0 44px;display:flex;align-items:center;gap:8px;padding:0 12px;}
+  .tbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap;}
+  .tbtn:hover{border-color:var(--accent);color:var(--accent);}
+  .tbtn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tbtn.primary:hover{background:var(--accent-dark);}
+  .toolbar .spacer{flex:1;}
+  .body{flex:1;display:flex;min-height:0;}
+  /* 左：三级树 */
+  .left{flex:0 0 280px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;}
+  .panel-head{height:36px;flex:0 0 36px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);font-weight:600;color:var(--sub);font-size:12px;}
+  .panel-head .btns{display:flex;gap:2px;}
+  .icon-btn{border:none;background:transparent;cursor:pointer;color:var(--sub);border-radius:4px;width:22px;height:22px;font-size:13px;line-height:22px;}
+  .icon-btn:hover{background:#eef2f9;color:var(--accent);}
+  .mini-btn{border:1px solid var(--border);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 7px;color:var(--sub);white-space:nowrap;}
+  .mini-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .tree{flex:1;overflow:auto;padding:6px 4px;}
+  .t-group{margin:2px 0;}
+  .t-row{display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:6px;cursor:pointer;white-space:nowrap;}
+  .t-row:hover{background:#f0f4fb;}
+  .t-row.sel{background:#e3ecfd;}
+  .t-row .tw{width:12px;font-size:10px;color:var(--faint);flex:0 0 12px;text-align:center;}
+  .t-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+  .t-row .cnt{margin-left:auto;background:#eef1f6;border-radius:9px;font-size:11px;padding:0 6px;color:var(--sub);flex:0 0 auto;}
+  .t-row .row-act{display:none;color:var(--faint);font-size:12px;flex:0 0 auto;}
+  .t-row:hover .row-act{display:inline;}
+  .t-row .row-act:hover{color:var(--red);}
+  .t-group .t-group{margin-left:14px;border-left:1px dashed #e0e5ee;padding-left:6px;}
+  .t-chart{margin-left:30px;border-left:1px dashed #e8ecf3;padding-left:8px;}
+  .t-empty{padding:6px 8px 6px 20px;color:var(--faint);font-size:12px;font-style:italic;}
+  /* 中：图表列表 */
+  .mid{flex:0 0 320px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;}
+  .mid-sub{padding:8px 10px;font-size:12px;color:var(--sub);border-bottom:1px solid var(--border);}
+  .mid-sub b{color:var(--text);}
+  .card-list{flex:1;overflow:auto;padding:6px 8px;}
+  .card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin:6px 0;cursor:pointer;}
+  .card:hover{border-color:#b9c8e8;box-shadow:0 1px 4px rgba(30,58,95,.08);}
+  .card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .c-top{display:flex;align-items:center;gap:6px;}
+  .c-name{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
+  .c-meta{font-size:11.5px;color:var(--faint);margin-top:4px;}
+  .c-actions{display:flex;gap:6px;margin-top:8px;}
+  .mini{font-size:11.5px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);background:#fff;cursor:pointer;white-space:nowrap;}
+  .mini:hover{border-color:var(--accent);color:var(--accent);}
+  .mini.danger:hover{border-color:var(--red);color:var(--red);}
+  /* 右：工作区 */
+  .right{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;}
+  .tabs{height:40px;flex:0 0 40px;display:flex;align-items:flex-end;gap:2px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--border);}
+  .tab{padding:8px 14px;cursor:pointer;font-size:13px;color:var(--sub);border-bottom:2px solid transparent;white-space:nowrap;}
+  .tab:hover{color:var(--accent);}
+  .tab.act{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+  .work{flex:1;overflow:auto;padding:14px 16px;min-height:0;}
+  .page{display:none;}
+  .page.act{display:block;}
+  .fgroup{margin-bottom:13px;}
+  .flabel{font-size:12.5px;color:var(--sub);margin-bottom:5px;}
+  .flabel b{color:var(--text);}
+  .hint{font-size:11.5px;color:var(--faint);margin-top:4px;line-height:1.5;}
+  input[type=number],input[type=text],select{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;background:#fff;}
+  input:focus,select:focus{border-color:var(--accent);}
+  .row2{display:flex;gap:12px;}
+  .row2 .fgroup{flex:1;min-width:0;}
+  .note{background:#fff8e6;border:1px solid #f3dfa8;border-radius:6px;padding:8px 10px;font-size:12px;color:#8a6d1a;line-height:1.6;}
+  .note.blue{background:#eef4ff;border-color:#c6d8ff;color:#2b4f9e;}
+  /* 系列配置 */
+  .srow{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:10px;background:#fff;}
+  .srow-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .srow-head .idx{color:var(--faint);font-size:12px;white-space:nowrap;}
+  .srow-head input{flex:1;min-width:0;}
+  .srow-body{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .cell{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);white-space:nowrap;}
+  .cell select{width:auto;min-width:110px;}
+  .cell input{width:64px;}
+  .swatch{width:22px;height:22px;border-radius:5px;border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 1px var(--border);flex:0 0 22px;}
+  .shape-btn{width:26px;height:26px;border:1px solid var(--border);background:#fff;border-radius:5px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:#4b5563;}
+  .shape-btn.sel{border-color:var(--accent);background:#eef4ff;color:var(--accent);}
+  .palette{position:absolute;z-index:50;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.14);padding:8px;display:none;width:216px;}
+  .palette.open{display:block;}
+  .palette .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;}
+  .palette .sw{width:100%;aspect-ratio:1;border-radius:4px;cursor:pointer;border:1px solid rgba(0,0,0,.08);}
+  .palette .sw:hover{outline:2px solid var(--accent);outline-offset:1px;}
+  .palette .pname{font-size:11px;color:var(--faint);margin-bottom:6px;}
+  /* 预览 */
+  .preview-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
+  .preview-head .info{font-size:12.5px;color:var(--sub);white-space:nowrap;}
+  .canvas-wrap{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:8px;position:relative;}
+  #chart{width:100%;height:420px;display:block;}
+  .legend{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;}
+  .lg-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;}
+  .lg-dot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;}
+  .tip{position:absolute;background:rgba(30,41,59,.92);color:#fff;font-size:11.5px;padding:5px 9px;border-radius:5px;pointer-events:none;display:none;white-space:nowrap;z-index:20;}
+  .statusbar{height:26px;flex:0 0 26px;background:#eef1f6;border-top:1px solid var(--border);display:flex;align-items:center;padding:0 12px;font-size:11.5px;color:var(--sub);gap:16px;}
+  .statusbar .right{margin-left:auto;display:flex;gap:16px;}
+  .toast-wrap{position:fixed;top:14px;right:14px;z-index:200;display:flex;flex-direction:column;gap:8px;}
+  .toast{background:#1f2937;color:#fff;padding:9px 14px;border-radius:7px;font-size:12.5px;box-shadow:0 6px 18px rgba(0,0,0,.2);max-width:340px;overflow:hidden;text-overflow:ellipsis;}
+  .toast.ok{background:#166534;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">📊</span>
+  <span class="title">Excel 散点图生成器</span>
+  <span class="ver">v3.2 预览原型</span>
+  <div class="menu"><span>文件</span><span>编辑</span><span>帮助</span></div>
+  <div class="right">
+    <button class="hbtn" onclick="toast('打开导出文件所在文件夹','')">📂 打开文件夹</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="tbtn" onclick="toast('请在数据设置页选择原始 Excel','warn')">📥 导入原始数据</button>
+  <button class="tbtn primary" onclick="toast('导出：Sheet1=raw data，其后每张图一个 Sheet','ok')">📈 导出散点图文件</button>
+  <button class="tbtn" onclick="toast('项目组/项目/图表/系列均支持增删改查','')">🔄 刷新状态</button>
+  <div class="spacer"></div>
+  <span style="color:var(--faint);font-size:12px;white-space:nowrap;">当前项目：</span>
+  <b id="curProject" style="font-size:12.5px;white-space:nowrap;">—</b>
+</div>
+
+<div class="body">
+  <!-- 左：三级树 -->
+  <div class="left">
+    <div class="panel-head"><span>📁 项目组</span>
+      <span class="btns">
+        <button class="mini-btn" title="在当前/选中的项目组下新建项目（数据表）" onclick="addProject()">＋项目</button>
+        <button class="mini-btn" title="新建项目组" onclick="addGroup()">＋项目组</button>
+      </span>
+    </div>
+    <div class="tree" id="tree"></div>
+  </div>
+
+  <!-- 中：图表列表 -->
+  <div class="mid">
+    <div class="panel-head"><span>📋 图表</span>
+      <span class="btns"><button class="icon-btn" title="新建图表" onclick="addChart()">＋</button></span>
+    </div>
+    <div class="mid-sub" id="midSub">请先在左侧选择一个项目</div>
+    <div class="card-list" id="chartList"></div>
+  </div>
+
+  <!-- 右：工作区 -->
+  <div class="right">
+    <div class="tabs">
+      <div class="tab act" data-tab="data" onclick="switchTab('data')">数据设置</div>
+      <div class="tab" data-tab="series" onclick="switchTab('series')">系列配置</div>
+      <div class="tab" data-tab="options" onclick="switchTab('options')">图表选项</div>
+      <div class="tab" data-tab="preview" onclick="switchTab('preview')">图表预览</div>
+    </div>
+    <div class="work">
+
+      <!-- 数据设置 -->
+      <div class="page act" id="page-data">
+        <div class="fgroup">
+          <div class="flabel"><b>原始数据文件</b>（一次性数据源）</div>
+          <div class="row2">
+            <input type="text" id="srcFile" value="LP G2 110W Perofrmance_NF-2026-07-01--40C 085905=Report-update.xlsx" readonly style="flex:1;">
+            <button class="tbtn" onclick="toast('打开文件选择器（演示）','')">📂 选择…</button>
+          </div>
+          <div class="hint">仅读取数据，不修改原文件；导出时原样复制到 Sheet1，之后无需再依赖原文件。</div>
+        </div>
+
+        <div class="row2">
+          <div class="fgroup">
+            <div class="flabel"><b>起始行</b>（真实 Excel 行号）</div>
+            <input type="number" min="1" value="17" id="startRow">
+          </div>
+          <div class="fgroup">
+            <div class="flabel"><b>结束行</b>（真实 Excel 行号）</div>
+            <input type="number" min="1" value="4195" id="endRow">
+          </div>
+        </div>
+        <div class="row2">
+          <div class="fgroup">
+            <div class="flabel"><b>起始列</b>（字母）</div>
+            <input type="text" value="A" id="startCol">
+          </div>
+          <div class="fgroup">
+            <div class="flabel"><b>结束列</b>（字母）</div>
+            <input type="text" value="AM" id="endCol">
+          </div>
+        </div>
+        <div class="fgroup">
+          <div class="note">💡 无「表头在第 1 行」假设：起始行/结束行/起始列/结束列均由你指定，原样复制保留原列位置，列字母不变。</div>
+        </div>
+        <div class="fgroup">
+          <div class="note blue">示例：本测试项目的表头在第 17 行、数据从第 19 行起，共 4195 行、39 列。</div>
+        </div>
+        <button class="tbtn primary" onclick="toast('数据范围已应用（演示）','ok'); switchTab('series')">✅ 应用范围并配置图表系列</button>
+      </div>
+
+      <!-- 系列配置 -->
+      <div class="page" id="page-series">
+        <div id="seriesTop"></div>
+        <div id="seriesList"></div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button class="tbtn" onclick="addSeries()">＋ 添加系列</button>
+          <button class="tbtn primary" onclick="switchTab('preview')">📈 预览图表</button>
+        </div>
+        <div class="note" style="margin-top:10px;">💡 每个系列都需指定「X 列 + Y 列 + 行范围」，用于对比不同行段（如低/中/高功率系列），不默认整表。</div>
+      </div>
+
+      <!-- 图表选项 -->
+      <div class="page" id="page-options">
+        <div class="fgroup"><div class="flabel"><b>图表名</b>（也用作输出 Sheet 名）</div><input type="text" id="optChartName"></div>
+        <div class="fgroup"><div class="flabel"><b>图表标题</b></div><input type="text" id="optTitle"></div>
+        <div class="row2">
+          <div class="fgroup"><div class="flabel"><b>X 轴标签</b></div><input type="text" id="optX"></div>
+          <div class="fgroup"><div class="flabel"><b>Y 轴标签</b></div><input type="text" id="optY"></div>
+        </div>
+        <div class="row2">
+          <div class="fgroup"><div class="flabel"><b>X 轴范围</b></div><div class="row2"><input type="text" placeholder="自动" id="xMin"><input type="text" placeholder="自动" id="xMax"></div></div>
+          <div class="fgroup"><div class="flabel"><b>Y 轴范围</b></div><div class="row2"><input type="text" placeholder="自动" id="yMin"><input type="text" placeholder="自动" id="yMax"></div></div>
+        </div>
+        <div class="fgroup"><div class="flabel"><b>X 轴刻度</b></div>
+          <div class="row2">
+            <div class="fgroup"><div class="flabel">步长（主要刻度）</div><input type="text" placeholder="自动" id="xMajor"></div>
+            <div class="fgroup"><div class="flabel">最小网格步长（次要刻度）</div><input type="text" placeholder="自动 = 步长÷5" id="xMinor"></div>
+          </div>
+        </div>
+        <div class="fgroup"><div class="flabel"><b>Y 轴刻度</b></div>
+          <div class="row2">
+            <div class="fgroup"><div class="flabel">步长（主要刻度）</div><input type="text" placeholder="自动" id="yMajor"></div>
+            <div class="fgroup"><div class="flabel">最小网格步长（次要刻度）</div><input type="text" placeholder="自动 = 步长÷5" id="yMinor"></div>
+          </div>
+          <div class="hint">💡 每个大网格下分 5 个小网格（如步长 0.005 → 小格 0.001），像 Excel 一样方便读取刻度。</div>
+        </div>
+        <div class="fgroup"><label style="display:flex;align-items:center;gap:7px;"><input type="checkbox" id="optGrid" checked> 显示网格线</label></div>
+        <div class="fgroup"><label style="display:flex;align-items:center;gap:7px;"><input type="checkbox" id="optLine" checked> 散点连线（折线连接）</label></div>
+      </div>
+
+      <!-- 预览 -->
+      <div class="page" id="page-preview">
+        <div class="preview-head">
+          <span class="info" id="pvInfo">—</span>
+          <span style="flex:1"></span>
+          <button class="tbtn" onclick="drawChart()">🔄 刷新预览</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="chart"></canvas>
+          <div class="tip" id="tip"></div>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="hint" style="margin-top:8px;">预览为示意渲染；实际导出由 openpyxl 生成原生 ScatterChart（每个系列按其行范围取数据）。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span>✅ 就绪</span>
+  <span>结构：项目组 → 项目（数据表）→ 图表 → 系列</span>
+  <div class="right">
+    <span>项目组 <b id="sbG">2</b> · 项目 <b id="sbP">2</b> · 图表 <b id="sbC">0</b></span>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+/* ============ 数据模型（测试项目） ============ */
+const PALETTE = [["红色","#FF0000"],["深红","#C00000"],["橙色","#FFC000"],["金色","#FFD966"],["黄色","#FFFF00"],["亮绿","#92D050"],["绿色","#00B050"],["深绿","#006100"],["青色","#00B0F0"],["深蓝","#0070C0"],["蓝色","#0000FF"],["紫色","#7030A0"],["洋红","#FF00FF"],["粉色","#FF99CC"],["棕色","#A52A2A"],["黑色","#000000"]];
+const SHAPES = [["circle","●"],["diamond","◆"],["square","■"],["triangle","▲"]];
+
+let GROUPS = [
+  {
+    id:"g1", name:"测试项目组",
+    projects:[
+      {
+        id:"p1", name:"LP G2 110W Performance",
+        src:"LP G2 110W Perofrmance_NF-2026-07-01--40C 085905=Report-update.xlsx",
+        range:{startRow:17, endRow:4195, startCol:"A", endCol:"AM"},
+        columns:["test no.","Mains Voltage [V]","Mains Freq. [Hz]","Set Temp. [C deg.]","Temperature [°C]","Voltage RMS [V]","Current RMS [A]","Power [W]","PF","Freq. [Hz]","THD [%]","Ripple [%]"],
+        charts:[
+          {
+            id:"c1", name:"功率 vs 电压", title:"各功率系列在同一电压范围的功率波动",
+            xCol:"Voltage RMS [V]", yCol:"Power [W]",
+            xLabel:"电压 (V)", yLabel:"功率 (W)", showGrid:true,
+            xMajor:5, xMinor:1, yMajor:10, yMinor:2,
+            series:[
+              {name:"低功率系列", xCol:"Voltage RMS [V]", yCol:"Power [W]", rowStart:19, rowEnd:100, color:"#FF0000", shape:"circle", size:6, base:10},
+              {name:"中功率系列", xCol:"Voltage RMS [V]", yCol:"Power [W]", rowStart:101, rowEnd:200, color:"#0000FF", shape:"diamond", size:6, base:30},
+              {name:"高功率系列", xCol:"Voltage RMS [V]", yCol:"Power [W]", rowStart:201, rowEnd:300, color:"#00B050", shape:"square", size:6, base:60},
+            ]
+          },
+          {
+            id:"c2", name:"Pout vs THD", title:"输出功率 vs 总谐波失真",
+            xCol:"THD [%]", yCol:"Power [W]",
+            xLabel:"THD (%)", yLabel:"Pout (W)", showGrid:true,
+            series:[
+              {name:"1050mA-230V-50HZ", xCol:"THD [%]", yCol:"Power [W]", rowStart:19, rowEnd:80, color:"#0070C0", shape:"circle", size:6, base:50},
+              {name:"700mA-230V-50HZ", xCol:"THD [%]", yCol:"Power [W]", rowStart:81, rowEnd:160, color:"#7030A0", shape:"diamond", size:6, base:35},
+            ]
+          }
+        ]
+      },
+      {
+        id:"p2", name:"performace ESR3",
+        src:"performace ESR3 20260702 -no.1.xlsx",
+        range:{startRow:1, endRow:6000, startCol:"A", endCol:"N"},
+        columns:["Current [mA]","Voltage [V]","THD [%]","Pout [W]","PF","Ripple [%]"],
+        charts:[
+          { id:"c3", name:"Pout vs THD (25-55C)", title:"", xCol:"THD [%]", yCol:"Pout [W]", xLabel:"THD (%)", yLabel:"Pout (W)", showGrid:true,
+            series:[ {name:"25C", xCol:"THD [%]", yCol:"Pout [W]", rowStart:25, rowEnd:50, color:"#FFC000", shape:"circle", size:6, base:45} ] }
+        ]
+      }
+    ]
+  },
+  { id:"g2", name:"默认项目组", projects:[] }
+];
+
+let curGroup = null, curProject = null, curChart = null;
+let seedCounter = 0;
+
+/* ============ 工具 ============ */
+function findProject(pid){ for(const g of GROUPS) for(const p of g.projects) if(p.id===pid) return p; return null; }
+function findChart(pid,cid){ const p=findProject(pid); if(!p) return null; return p.charts.find(c=>c.id===cid)||null; }
+function countStats(){ let g=GROUPS.length, p=0, c=0; GROUPS.forEach(x=>{p+=x.projects.length; x.projects.forEach(pr=>c+=pr.charts.length);}); return [g,p,c]; }
+
+/* ============ 三级树 ============ */
+function renderTree(){
+  const t=document.getElementById("tree"); t.innerHTML="";
+  GROUPS.forEach(g=>{
+    const gwrap=document.createElement("div"); gwrap.className="t-group";
+    const grow=document.createElement("div"); grow.className="t-row"+(curGroup&&curGroup.id===g.id?" sel":"");
+    grow.innerHTML=`<span class="tw">${g._open===false?"▸":"▾"}</span><span class="nm">📁 ${g.name}</span><span class="cnt">${g.projects.length}</span><span class="row-act" title="在此组下新建项目" onclick="addProject('${g.id}')">＋</span><span class="row-act" title="删除项目组" onclick="delGroup('${g.id}')">✕</span>`;
+    grow.onclick=(e)=>{ if(e.target.classList.contains('row-act'))return; g._open = g._open===false?true:false; curGroup=g; renderTree(); };
+    gwrap.appendChild(grow);
+    if(g._open!==false){
+      g.projects.forEach(p=>{
+        const pwrap=document.createElement("div"); pwrap.className="t-group";
+        const prow=document.createElement("div"); prow.className="t-row"+(curProject&&curProject.id===p.id?" sel":"");
+        prow.innerHTML=`<span class="tw">${p._open===false?"▸":"▾"}</span><span class="nm">📄 ${p.name}</span><span class="cnt">${p.charts.length}图</span><span class="row-act" onclick="delProject('${g.id}','${p.id}')">✕</span>`;
+        prow.onclick=(e)=>{ if(e.target.classList.contains('row-act'))return; p._open = p._open===false?true:false; selectProject(g.id,p.id); };
+        pwrap.appendChild(prow);
+        if(p._open!==false){
+          const cwrap=document.createElement("div"); cwrap.className="t-chart";
+          p.charts.forEach(c=>{
+            const crow=document.createElement("div"); crow.className="t-row"+(curChart&&curChart.id===c.id?" sel":"");
+            crow.innerHTML=`<span class="tw"></span><span class="nm">📈 ${c.name}</span>`;
+            crow.onclick=()=>{ selectChart(g.id,p.id,c.id); };
+            cwrap.appendChild(crow);
+          });
+          if(!p.charts.length){ const e=document.createElement("div"); e.className="t-empty"; e.textContent="（无图表）"; cwrap.appendChild(e); }
+          pwrap.appendChild(cwrap);
+        }
+        gwrap.appendChild(pwrap);
+      });
+      if(!g.projects.length){ const e=document.createElement("div"); e.className="t-empty"; e.textContent="（无项目，点击左侧 ＋ 新建）"; gwrap.appendChild(e); }
+    }
+    t.appendChild(gwrap);
+  });
+  // 底部新增项目组按钮
+  const addg=document.createElement("div"); addg.className="t-row"; addg.style.color="var(--faint)";
+  addg.innerHTML=`<span class="tw"></span><span class="nm">＋ 新建项目组</span>`;
+  addg.onclick=()=>addGroup();
+  t.appendChild(addg);
+  updateStatus();
+}
+
+function selectProject(gid,pid){
+  curGroup=GROUPS.find(g=>g.id===gid);
+  curProject=findProject(pid);
+  curChart = curProject.charts[0] || null;
+  document.getElementById("curProject").textContent = curProject.name;
+  renderTree();
+  renderChartList();
+  renderDataSettings();
+  if(curChart) renderSeries(); else document.getElementById("seriesList").innerHTML="<div class='t-empty'>请先新建图表</div>";
+  switchTab("data");
+  toast(`已选中数据表「${curProject.name}」，自动跳转到数据设置页`,"");
+}
+
+function selectChart(gid,pid,cid){
+  curGroup=GROUPS.find(g=>g.id===gid);
+  curProject=findProject(pid);
+  curChart=findChart(pid,cid);
+  renderTree(); renderChartList();
+  renderSeries(); renderOptions();
+  switchTab("series");
+  drawChart();
+}
+
+/* ============ 中间图表列表 ============ */
+function renderChartList(){
+  const el=document.getElementById("chartList"); el.innerHTML="";
+  const sub=document.getElementById("midSub");
+  if(!curProject){ sub.innerHTML="请先在左侧选择一个项目"; return; }
+  sub.innerHTML=`项目 <b>${curProject.name}</b> · 共 <b>${curProject.charts.length}</b> 张图`;
+  curProject.charts.forEach(c=>{
+    const card=document.createElement("div"); card.className="card"+(curChart&&curChart.id===c.id?" sel":"");
+    card.innerHTML=`
+      <div class="c-top"><span class="c-name">${c.name}</span></div>
+      <div class="c-meta">${c.series.length} 个系列 · X=${c.xCol} · Y=${c.yCol}</div>
+      <div class="c-actions">
+        <button class="mini" onclick="event.stopPropagation();selectChart('${curGroup.id}','${curProject.id}','${c.id}')">✏️ 编辑</button>
+        <button class="mini danger" onclick="event.stopPropagation();delChart('${curProject.id}','${c.id}')">🗑 删除</button>
+      </div>`;
+    card.onclick=()=>selectChart(curGroup.id,curProject.id,c.id);
+    el.appendChild(card);
+  });
+}
+
+/* ============ 数据设置 ============ */
+function renderDataSettings(){
+  if(!curProject) return;
+  document.getElementById("srcFile").value = curProject.src;
+  document.getElementById("startRow").value = curProject.range.startRow;
+  document.getElementById("endRow").value = curProject.range.endRow;
+  document.getElementById("startCol").value = curProject.range.startCol;
+  document.getElementById("endCol").value = curProject.range.endCol;
+}
+
+/* ============ 系列配置（CRUD） ============ */
+function renderSeries(){
+  const top=document.getElementById("seriesTop");
+  const list=document.getElementById("seriesList");
+  if(!curChart){ list.innerHTML="<div class='t-empty'>请先新建图表</div>"; top.innerHTML=""; return; }
+  top.innerHTML=`<div class="fgroup"><div class="flabel">当前图表：<b>${curChart.name}</b>（${curChart.series.length} 个系列）</div></div>`;
+  list.innerHTML="";
+  curChart.series.forEach((s,idx)=>{
+    const row=document.createElement("div"); row.className="srow";
+    row.innerHTML=`
+      <div class="srow-head">
+        <span class="idx">系列 ${idx+1}</span>
+        <input type="text" value="${s.name}" onchange="curChart.series[${idx}].name=this.value">
+        <button class="icon-btn" title="上移" onclick="moveSeries(${idx},-1)">▲</button>
+        <button class="icon-btn" title="下移" onclick="moveSeries(${idx},1)">▼</button>
+        <button class="icon-btn" title="删除系列" onclick="delSeries(${idx})">🗑</button>
+      </div>
+      <div class="srow-body">
+        <span class="cell">X 列 <select onchange="curChart.series[${idx}].xCol=this.value;renderSeries()">${colOptions(s.xCol)}</select></span>
+        <span class="cell">Y 列 <select onchange="curChart.series[${idx}].yCol=this.value;renderSeries()">${colOptions(s.yCol)}</select></span>
+        <span class="cell">起始行 <input type="number" value="${s.rowStart}" min="1" onchange="curChart.series[${idx}].rowStart=+this.value"></span>
+        <span class="cell">结束行 <input type="number" value="${s.rowEnd}" min="1" onchange="curChart.series[${idx}].rowEnd=+this.value"></span>
+        <span class="cell">颜色 <span class="swatch" style="background:${s.color}" onclick="togglePalette(this,${idx})"></span></span>
+        <span class="cell">形状 ${SHAPES.map(sh=>`<button class="shape-btn ${s.shape===sh[0]?'sel':''}" onclick="setShape(${idx},'${sh[0]}')">${sh[1]}</button>`).join("")}</span>
+        <span class="cell">大小 <input type="number" value="${s.size}" min="3" max="20" style="width:56px;" onchange="curChart.series[${idx}].size=+this.value"></span>
+      </div>
+      <div class="palette" id="pal-${idx}">
+        <div class="pname">仅 16 种标准色</div>
+        <div class="grid">${PALETTE.map(c=>`<div class="sw" style="background:${c[1]}" title="${c[0]}" onclick="setColor(${idx},'${c[1]}')"></div>`).join("")}</div>
+      </div>`;
+    list.appendChild(row);
+  });
+}
+
+function colOptions(sel){
+  return (curProject?curProject.columns:[]).map(c=>`<option ${c===sel?'selected':''}>${c}</option>`).join("");
+}
+function addSeries(){
+  if(!curChart){ toast("请先新建图表","warn"); return; }
+  const last=curChart.series[curChart.series.length-1];
+  curChart.series.push({name:`系列 ${curChart.series.length+1}`, xCol:last?last.xCol:(curChart.xCol||""), yCol:last?last.yCol:(curChart.yCol||""), rowStart:last?last.rowEnd+1:1, rowEnd:last?last.rowEnd+50:100, color:PALETTE[curChart.series.length%16][1], shape:"circle", size:6, base:20+curChart.series.length*5});
+  renderSeries(); renderChartList(); toast("已添加系列","ok");
+}
+function delSeries(i){ curChart.series.splice(i,1); renderSeries(); renderChartList(); toast("已删除系列","ok"); }
+function moveSeries(i,d){ const j=i+d; if(j<0||j>=curChart.series.length) return; const t=curChart.series[i]; curChart.series[i]=curChart.series[j]; curChart.series[j]=t; renderSeries(); }
+function setShape(i,sh){ curChart.series[i].shape=sh; renderSeries(); }
+function setColor(i,c){ curChart.series[i].color=c; renderSeries(); }
+function togglePalette(el,i){
+  document.querySelectorAll(".palette.open").forEach(p=>p.classList.remove("open"));
+  el.parentElement.parentElement.querySelector(".palette").classList.toggle("open");
+  document.addEventListener("click",function h(e){ if(!e.target.closest(".palette")){document.querySelectorAll(".palette.open").forEach(p=>p.classList.remove("open"));document.removeEventListener("click",h);} });
+}
+
+/* ============ 图表选项 ============ */
+function renderOptions(){
+  if(!curChart) return;
+  document.getElementById("optChartName").value = curChart.name;
+  document.getElementById("optTitle").value = curChart.title;
+  document.getElementById("optX").value = curChart.xLabel||"";
+  document.getElementById("optY").value = curChart.yLabel||"";
+  document.getElementById("optGrid").checked = curChart.showGrid;
+  document.getElementById("optLine").checked = curChart.connect_line!==false;
+  document.getElementById("xMajor").value = curChart.xMajor!=null?curChart.xMajor:"";
+  document.getElementById("xMinor").value = curChart.xMinor!=null?curChart.xMinor:"";
+  document.getElementById("yMajor").value = curChart.yMajor!=null?curChart.yMajor:"";
+  document.getElementById("yMinor").value = curChart.yMinor!=null?curChart.yMinor:"";
+}
+function _num(v){ v=v.trim(); return v===""?null:parseFloat(v); }
+function syncOptions(){
+  if(!curChart) return;
+  curChart.name = document.getElementById("optChartName").value || curChart.name;
+  curChart.title = document.getElementById("optTitle").value;
+  curChart.xLabel = document.getElementById("optX").value;
+  curChart.yLabel = document.getElementById("optY").value;
+  curChart.showGrid = document.getElementById("optGrid").checked;
+  curChart.connect_line = document.getElementById("optLine").checked;
+  curChart.xMajor = _num(document.getElementById("xMajor").value);
+  curChart.xMinor = _num(document.getElementById("xMinor").value);
+  curChart.yMajor = _num(document.getElementById("yMajor").value);
+  curChart.yMinor = _num(document.getElementById("yMinor").value);
+  renderTree(); renderChartList();
+}
+
+/* ============ 图表 CRUD ============ */
+function addChart(){
+  if(!curProject){ toast("请先选择项目","warn"); return; }
+  const c={id:"c"+Date.now(), name:`图表 ${curProject.charts.length+1}`, title:"", xCol:curProject.columns[0]||"", yCol:curProject.columns[1]||"", xLabel:"", yLabel:"", showGrid:true, series:[]};
+  curProject.charts.push(c); curChart=c;
+  renderTree(); renderChartList(); renderSeries(); renderOptions();
+  switchTab("series"); toast("已新建图表，可添加系列","ok");
+}
+function delChart(pid,cid){
+  const p=findProject(pid); p.charts=p.charts.filter(c=>c.id!==cid);
+  if(curChart&&curChart.id===cid) curChart=p.charts[0]||null;
+  renderTree(); renderChartList(); if(curChart) renderSeries(); toast("已删除图表","ok");
+}
+
+/* ============ 项目/项目组 CRUD ============ */
+function addProject(gid){
+  const g = gid ? GROUPS.find(x=>x.id===gid) : (curGroup || GROUPS[0]);
+  if(!g){ toast("请先选择或新建项目组","warn"); return; }
+  const name=prompt("项目名称（= 一个原始数据表格）：","新项目"); if(!name) return;
+  const p={id:"p"+Date.now(), name:name, src:"（新项目：请在「数据设置」页选择原始 Excel）",
+    range:{startRow:1,endRow:100,startCol:"A",endCol:"D"},
+    columns:["A 列","B 列","C 列","D 列"], charts:[]};
+  g.projects.push(p);
+  g._open=true; curGroup=g; curProject=p; curChart=null;
+  document.getElementById("curProject").textContent=p.name;
+  renderTree(); renderChartList(); renderDataSettings();
+  document.getElementById("seriesList").innerHTML="<div class='t-empty'>本项目还没有图表，点击中间「＋」新建图表</div>";
+  switchTab("data");
+  toast(`已在「${g.name}」下新建项目「${p.name}」，请到数据设置页导入原始数据`,"ok");
+}
+function addGroup(){
+  const name=prompt("项目组名称：","新项目组"); if(!name) return;
+  GROUPS.push({id:"g"+Date.now(), name:name, projects:[]});
+  renderTree(); toast("已新建项目组","ok");
+}
+function delGroup(gid){
+  if(!confirm("删除该项目组及其下所有项目/图表？")) return;
+  GROUPS=GROUPS.filter(g=>g.id!==gid); curGroup=null; curProject=null; curChart=null;
+  renderTree(); renderChartList(); toast("已删除项目组","ok");
+}
+function delProject(gid,pid){
+  const g=GROUPS.find(x=>x.id===gid); g.projects=g.projects.filter(p=>p.id!==pid);
+  if(curProject&&curProject.id===pid){ curProject=null; curChart=null; }
+  renderTree(); renderChartList(); toast("已删除项目","ok");
+}
+
+/* ============ 预览（canvas 散点） ============ */
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function drawChart(){
+  const cv=document.getElementById("chart");
+  if(!curChart){ const ctx=cv.getContext("2d"); ctx.clearRect(0,0,cv.width,cv.height); return; }
+  const info=document.getElementById("pvInfo");
+  info.innerHTML=`图表「<b>${curChart.name}</b>」 · ${curChart.series.length} 个系列 · X=${curChart.xCol} · Y=${curChart.yCol}`;
+  document.getElementById("legend").innerHTML = curChart.series.map(s=>`<span class="lg-item"><span class="lg-dot" style="background:${s.color}"></span>${s.name}（行 ${s.rowStart}~${s.rowEnd}）</span>`).join("");
+
+  const dpr=window.devicePixelRatio||1, w=cv.clientWidth, h=420;
+  cv.width=w*dpr; cv.height=h*dpr;
+  const ctx=cv.getContext("2d"); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
+  const pad={l:56,r:16,t:16,b:40}, iw=w-pad.l-pad.r, ih=h-pad.t-pad.b;
+
+  // 生成每个系列的点（按行范围），按 X 排序
+  const seriesPts=[];
+  curChart.series.forEach(s=>{
+    const n=s.rowEnd-s.rowStart+1;
+    const rnd=mulberry(seedCounter++*1000 + s.rowStart);
+    const pts=[];
+    for(let i=0;i<n;i++){
+      const x=198 + rnd()*56;            // 电压 198~254V
+      const y=s.base + (rnd()-0.5)*s.base*0.3;
+      pts.push({x,y});
+    }
+    pts.sort((a,b)=>a.x-b.x);
+    seriesPts.push({s,pts});
+  });
+  let xMin=190,xMax=262,yMin=0,yMax=80;
+  const X=v=>pad.l+(v-xMin)/(xMax-xMin)*iw, Y=v=>pad.t+ih-(v-yMin)/(yMax-yMin)*ih;
+
+  // 刻度：步长（主要）+ 最小网格步长（次要，默认步长/5）
+  const xMaj = curChart.xMajor!=null ? curChart.xMajor : (xMax-xMin)/6;
+  const xMinU = curChart.xMinor!=null ? curChart.xMinor : xMaj/5;
+  const yMaj = curChart.yMajor!=null ? curChart.yMajor : (yMax-yMin)/5;
+  const yMinU = curChart.yMinor!=null ? curChart.yMinor : yMaj/5;
+  const fmt = v => parseFloat(v.toPrecision(8)).toString();
+  ctx.font="11px sans-serif"; ctx.lineWidth=1;
+  // 小网格（次要刻度，浅色）
+  ctx.strokeStyle="#eef1f6";
+  for(let v=Math.ceil(xMin/xMinU)*xMinU; v<=xMax+1e-9; v+=xMinU){ const x=X(v); ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+ih);ctx.stroke(); }
+  for(let v=Math.ceil(yMin/yMinU)*yMinU; v<=yMax+1e-9; v+=yMinU){ const y=Y(v); ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+iw,y);ctx.stroke(); }
+  // 大网格（主要刻度，深色）+ 刻度标签
+  ctx.strokeStyle="#c8cedb"; ctx.fillStyle="#9aa3b2";
+  for(let v=Math.ceil(xMin/xMaj)*xMaj; v<=xMax+1e-9; v+=xMaj){ const x=X(v); ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+ih);ctx.stroke(); ctx.textAlign="center"; ctx.fillText(fmt(v),x,h-14); }
+  for(let v=Math.ceil(yMin/yMaj)*yMaj; v<=yMax+1e-9; v+=yMaj){ const y=Y(v); ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+iw,y);ctx.stroke(); ctx.textAlign="right"; ctx.fillText(fmt(v),pad.l-6,y+4); }
+  // 轴线
+  ctx.strokeStyle="#aab2c0"; ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ih);ctx.lineTo(pad.l+iw,pad.t+ih);ctx.stroke();
+  ctx.fillStyle="#6b7280"; ctx.textAlign="center"; ctx.fillText(curChart.xLabel||"X", pad.l+iw/2, h-2);
+  ctx.save(); ctx.translate(12,pad.t+ih/2); ctx.rotate(-Math.PI/2); ctx.fillText(curChart.yLabel||"Y",0,0); ctx.restore();
+  ctx.fillStyle="#1f2430"; ctx.font="600 13px sans-serif"; ctx.textAlign="left"; ctx.fillText(curChart.title||curChart.name, pad.l, 12);
+
+  const drawMark=(x,y,s)=>{ const r=Math.max(3,(s.size||6)/2); ctx.fillStyle=s.color; ctx.beginPath();
+    switch(s.shape){ case"circle":ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();break; case"square":ctx.fillRect(x-r,y-r,r*2,r*2);break; case"diamond":ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath();ctx.fill();break; case"triangle":ctx.moveTo(x,y-r);ctx.lineTo(x+r*1.1,y+r*.7);ctx.lineTo(x-r*1.1,y+r*.7);ctx.closePath();ctx.fill();break; } };
+  const lineOn = curChart.connect_line!==false;
+  seriesPts.forEach(({s,pts})=>{
+    if(lineOn && pts.length>1){   // 折线连接
+      ctx.strokeStyle=s.color; ctx.lineWidth=1.5; ctx.globalAlpha=0.8; ctx.beginPath();
+      pts.forEach((p,i)=>{ i===0?ctx.moveTo(X(p.x),Y(p.y)):ctx.lineTo(X(p.x),Y(p.y)); });
+      ctx.stroke(); ctx.globalAlpha=1;
+    }
+    pts.forEach(p=>drawMark(X(p.x),Y(p.y),s));   // 散点标记
+  });
+}
+
+/* ============ 标签页 ============ */
+function switchTab(name){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("act", t.dataset.tab===name));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("act", p.id==="page-"+name));
+  if(name==="options") syncOptions();
+  if(name==="preview") drawChart();
+}
+
+/* ============ 其他 ============ */
+function toast(msg,kind){ const w=document.getElementById("toasts"); const t=document.createElement("div"); t.className="toast"+(kind?" "+kind:""); t.textContent=msg; w.appendChild(t); setTimeout(()=>{t.style.opacity="0";t.style.transition="opacity .3s";setTimeout(()=>t.remove(),300);},3000); }
+function updateStatus(){ const [g,p,c]=countStats(); document.getElementById("sbG").textContent=g; document.getElementById("sbP").textContent=p; document.getElementById("sbC").textContent=c; }
+window.addEventListener("resize",()=>{ if(document.getElementById("page-preview").classList.contains("act")) drawChart(); });
+
+/* ============ 初始化：默认选中第一个项目 + 第一张图 ============ */
+curGroup = GROUPS[0];
+curProject = curGroup.projects[0];
+curChart = curProject.charts[0];
+renderTree();
+renderChartList();
+renderDataSettings();
+renderSeries();
+renderOptions();
+document.getElementById("curProject").textContent = curProject.name;
+drawChart();
+
+const q = new URLSearchParams(location.search);
+if(q.get("tab")) setTimeout(()=>switchTab(q.get("tab")), 100);
+</script>
+</body>
+</html>

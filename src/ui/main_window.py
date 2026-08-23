@@ -1,4 +1,4 @@
-"""主窗口：编排主题树 / 项目列表 / 各视图 / 预览 / 对话框，及数据库持久化。"""
+"""主窗口（v3.2）：项目组→项目→图表→系列 三级管理 + 精确行列范围 + 多图多 Sheet 导出。"""
 from __future__ import annotations
 
 import os
@@ -7,29 +7,27 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
-    QTabWidget, QVBoxLayout, QWidget,
+    QApplication, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QMainWindow, QMessageBox, QPushButton, QSplitter, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
 from src.core.database import SessionLocal
-from src.core.exceptions import FileMissingException, OperationCancelledException
-from src.models.project import ACTIVE, MISSING, Project
-from src.models.series import Series
-from src.models.theme import Theme
-from src.services.chart_builder import ChartOptions, SeriesConfig
-from src.services.excel_export_service import ExcelExportService
-from src.services.excel_handler import CHART_VIEW_SHEET, RAW_DATA_SHEET, ExcelHandler, SheetSlice
+from src.core.exceptions import OperationCancelledException
+from src.models import ACTIVE, MISSING, Chart, ChartLimit, Project, ProjectGroup, Series
+from src.services.chart_builder import ChartOptions, LimitRule, SeriesConfig
+from src.services.excel_export_service import ChartSpec, ExcelExportService
+from src.services.excel_handler import RAW_DATA_SHEET, ExcelHandler, SheetSlice
 from src.services.file_probe_service import FileProbeService
-from src.ui.dialogs import ExportDialog, ExportImageDialog, default_export_name
-from src.ui.views import ConfigView, ImportView, OptionsView
-from src.ui.widgets import DragDropThemeTree, PreviewWidget, ProjectListView
+from src.ui.dialogs import ExportDialog, default_export_name
+from src.ui.views import ImportView, OptionsView, SeriesView
+from src.ui.widgets import ChartListWidget, PreviewWidget, ProjectTreeWidget
 
-DEFAULT_THEME = "我的图表项目"
+DEFAULT_GROUP = "默认项目组"
 
 
 class ImportWorker(QThread):
-    success = Signal(object)  # SheetSlice
+    success = Signal(object)   # SheetSlice
     failed = Signal(str)
     cancelled = Signal()
 
@@ -45,10 +43,8 @@ class ImportWorker(QThread):
     def run(self):
         try:
             path, sr, er, sc, ec = self._args
-            if self._read_raw:
-                sl = self._handler.read_raw_data_sheet(path, sr, er, sc, ec)
-            else:
-                sl = self._handler.read_slice(path, sr, er, sc, ec)
+            sl = self._handler.read_range(path, sr, er, sc, ec,
+                                          sheet=RAW_DATA_SHEET if self._read_raw else None)
             self.success.emit(sl)
         except OperationCancelledException:
             self.cancelled.emit()
@@ -78,489 +74,432 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self.db = SessionLocal()
-        self._current_project: Project | None = None
-        self._source_slice: SheetSlice | None = None
-        self._source_basename: str = ""
-        self._series: list[SeriesConfig] = []
-        self._options = ChartOptions()
+        self.current_group: ProjectGroup | None = None
+        self.current_project: Project | None = None
+        self.current_chart: Chart | None = None
+        self.source_slice: SheetSlice | None = None
+        self.source_name: str = ""
         self._import_worker: ImportWorker | None = None
 
         self._build_ui()
         self._refresh_all()
         self._probe_async()
 
-    # ================= UI 构建 =================
+    # ================= UI =================
     def _build_ui(self):
-        # ---- 左：主题树 ----
-        self.tree = DragDropThemeTree()
-        self.tree.itemSelectionChanged.connect(self._on_tree_selected)
-        self.tree.orderChanged.connect(self._on_theme_reordered)
+        # 左：项目树
+        self.tree = ProjectTreeWidget()
+        self.tree.groupSelected.connect(self._on_group_selected)
+        self.tree.projectSelected.connect(self._on_project_selected)
+        self.tree.chartSelected.connect(self._on_chart_selected)
 
-        add_theme_btn = QPushButton("＋ 新建主题")
-        add_theme_btn.clicked.connect(self._add_theme)
-        del_theme_btn = QPushButton("🗑 删除主题")
-        del_theme_btn.clicked.connect(self._delete_theme)
-        theme_btns = QHBoxLayout()
-        theme_btns.addWidget(add_theme_btn)
-        theme_btns.addWidget(del_theme_btn)
+        add_project_btn = QPushButton("＋项目")
+        add_project_btn.setToolTip("在选中的项目组下新建项目（数据表）")
+        add_project_btn.clicked.connect(self._add_project)
+        add_group_btn = QPushButton("＋项目组")
+        add_group_btn.clicked.connect(self._add_group)
+        del_group_btn = QPushButton("🗑 项目组")
+        del_group_btn.clicked.connect(self._delete_group)
+        del_project_btn = QPushButton("🗑 项目")
+        del_project_btn.clicked.connect(self._delete_project)
+        btns = QVBoxLayout()
+        row1 = _hbox([add_project_btn, add_group_btn])
+        row2 = _hbox([del_group_btn, del_project_btn])
+        btns.addLayout(row1)
+        btns.addLayout(row2)
 
         left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(4, 4, 4, 4)
-        left_layout.addWidget(QLabel("📁 主题分组"))
-        left_layout.addWidget(self.tree, 1)
-        left_layout.addLayout(theme_btns)
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(4, 4, 4, 4)
+        ll.addWidget(QLabel("📁 项目组"))
+        ll.addWidget(self.tree, 1)
+        ll.addLayout(btns)
 
-        # ---- 中：项目列表 ----
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("🔍 搜索项目名称或路径…")
-        self.search.textChanged.connect(lambda _: self._refresh_list())
-
-        self.list = ProjectListView()
-        self.list.projectActivated.connect(self._open_project)
-        self.list.selectionChangedSig.connect(self._on_selection_changed)
-
-        self.sel_label = QLabel("已选 0 个")
-        self.batch_export_btn = QPushButton("批量导出")
-        self.batch_export_btn.clicked.connect(self._batch_export)
-        self.batch_delete_btn = QPushButton("批量删除")
-        self.batch_delete_btn.clicked.connect(self._batch_delete)
-        batch_row = QHBoxLayout()
-        batch_row.addWidget(self.sel_label)
-        batch_row.addWidget(self.batch_export_btn)
-        batch_row.addWidget(self.batch_delete_btn)
-
+        # 中：图表列表
+        self.chart_list = ChartListWidget()
+        self.chart_list.chartActivated.connect(self._on_chart_selected)
+        add_chart_btn = QPushButton("＋新建图表")
+        add_chart_btn.clicked.connect(self._add_chart)
+        del_chart_btn = QPushButton("🗑 删除图表")
+        del_chart_btn.clicked.connect(self._delete_chart)
         mid = QWidget()
-        mid_layout = QVBoxLayout(mid)
-        mid_layout.setContentsMargins(4, 4, 4, 4)
-        mid_layout.addWidget(QLabel("📋 图表项目"))
-        mid_layout.addWidget(self.search)
-        mid_layout.addWidget(self.list, 1)
-        mid_layout.addLayout(batch_row)
+        ml = QVBoxLayout(mid)
+        ml.setContentsMargins(4, 4, 4, 4)
+        ml.addWidget(QLabel("📋 图表"))
+        ml.addWidget(self.chart_list, 1)
+        ml.addLayout(_hbox([add_chart_btn, del_chart_btn]))
 
-        # ---- 右：标签页 ----
+        # 右：标签页
         self.tabs = QTabWidget()
         self.start_page = self._build_start_page()
         self.import_view = ImportView()
         self.import_view.applyRequested.connect(self._import)
-        self.config_view = ConfigView()
-        self.config_view.changed.connect(self._preview_from_state)
-        self.config_view.exportRequested.connect(self._export)
+        self.series_view = SeriesView()
+        self.series_view.changed.connect(self._preview)
         self.options_view = OptionsView()
-        self.options_view.changed.connect(self._preview_from_state)
+        self.options_view.changed.connect(self._preview)
         self.preview = PreviewWidget()
 
         self.tabs.addTab(self.start_page, "开始")
         self.tabs.addTab(self.import_view, "数据设置")
-        self.tabs.addTab(self.config_view, "系列配置")
+        self.tabs.addTab(self.series_view, "系列配置")
         self.tabs.addTab(self.options_view, "图表选项")
         self.tabs.addTab(self.preview, "图表预览")
 
-        # ---- 布局 ----
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left)
         splitter.addWidget(mid)
         splitter.addWidget(self.tabs)
-        splitter.setSizes([220, 320, 700])
+        splitter.setSizes([260, 300, 720])
         self.setCentralWidget(splitter)
 
-        # ---- 菜单 ----
         menubar = self.menuBar()
         file_menu = menubar.addMenu("文件(&F)")
-        file_menu.addAction("导入原始数据…", self._goto_import)
-        file_menu.addAction("导出图表…", self._export)
-        file_menu.addAction("导出为图片…", self._export_image)
-        self.recent_menu = file_menu.addMenu("最近打开")
+        file_menu.addAction("导入原始数据…", lambda: self.tabs.setCurrentWidget(self.import_view))
+        file_menu.addAction("导出散点图文件…", self._export)
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
-        help_menu = menubar.addMenu("帮助(&H)")
-        help_menu.addAction("关于", self._about)
 
-        # ---- 工具栏 ----
         tb = self.addToolBar("主工具栏")
         tb.setMovable(False)
-        tb.addAction("📥 导入原始数据", self._goto_import)
-        tb.addAction("📈 导出图表", self._export)
-        tb.addAction("📷 导出图片", self._export_image)
+        tb.addAction("📥 导入原始数据", lambda: self.tabs.setCurrentWidget(self.import_view))
+        tb.addAction("📈 导出散点图文件", self._export)
         tb.addAction("🔄 刷新状态", self._probe_async)
-        tb.addAction("📦 批量导出", self._batch_export)
 
         self.statusBar().showMessage("就绪")
 
     def _build_start_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("📊 最近打开的项目（最近 5 个）"))
+        layout.addWidget(QLabel("📊 最近打开的项目"))
         self.recent_list = QListWidget()
         self.recent_list.itemDoubleClicked.connect(self._on_recent_clicked)
         layout.addWidget(self.recent_list, 1)
-        row = QHBoxLayout()
-        import_btn = QPushButton("📂 导入新数据")
-        import_btn.clicked.connect(self._goto_import)
-        browse_btn = QPushButton("📁 浏览全部项目")
-        browse_btn.clicked.connect(lambda: self.tabs.setCurrentIndex(0))
-        row.addWidget(import_btn)
-        row.addWidget(browse_btn)
-        layout.addLayout(row)
+        imp = QPushButton("📂 导入新数据")
+        imp.clicked.connect(lambda: self.tabs.setCurrentWidget(self.import_view))
+        layout.addWidget(imp)
         return page
 
-    # ================= 数据刷新 =================
-    def _themes_data(self) -> list[dict]:
-        themes = self.db.query(Theme).order_by(Theme.sort_order, Theme.id).all()
-        result = []
-        for t in themes:
-            projects = []
-            for p in sorted(t.projects, key=lambda x: x.id):
-                projects.append({
-                    "id": p.id, "name": p.name, "path": p.source_file_path, "status": p.status,
-                })
-            result.append({"id": t.id, "name": t.name, "projects": projects})
-        return result
+    # ================= 刷新 =================
+    def _groups(self):
+        return self.db.query(ProjectGroup).order_by(ProjectGroup.sort_order, ProjectGroup.id).all()
 
     def _refresh_all(self):
+        # 过期全部对象，确保树/列表读到最新关系（新增图表/系列后集合同步）
+        self.db.expire_all()
         self._refresh_tree()
-        self._refresh_list()
+        self._refresh_chart_list()
         self._refresh_recent()
 
     def _refresh_tree(self):
-        themes = self._themes_data()
-        active_id = self._current_project.theme_id if self._current_project else None
-        self.tree.set_data(themes, active_theme_id=active_id)
+        self.tree.set_data(self._groups(), self.current_group, self.current_project, self.current_chart)
 
-    def _refresh_list(self):
-        text = self.search.text().strip().lower()
-        projects = []
-        for t in self._themes_data():
-            for p in t["projects"]:
-                if text and text not in p["name"].lower() and text not in p["path"].lower():
-                    continue
-                projects.append(p)
-        self.list.set_projects(projects)
+    def _refresh_chart_list(self):
+        charts = self.current_project.charts if self.current_project else []
+        self.chart_list.set_charts(charts, self.current_chart)
 
     def _refresh_recent(self):
         self.recent_list.clear()
         recent = (self.db.query(Project)
                   .filter(Project.last_opened_at.isnot(None))
-                  .order_by(Project.last_opened_at.desc())
-                  .limit(5).all())
+                  .order_by(Project.last_opened_at.desc()).limit(5).all())
         for p in recent:
             mark = "❌ " if p.status == MISSING else ""
             item = QListWidgetItem(f"{mark}{p.name}\n{p.source_file_path}")
             item.setData(Qt.ItemDataRole.UserRole, p.id)
             self.recent_list.addItem(item)
-        # 最近打开子菜单
-        self.recent_menu.clear()
-        for p in recent:
-            act = self.recent_menu.addAction(f"{p.name}")
-            act.triggered.connect(lambda _=False, pid=p.id: self._open_project_id(pid))
 
-    # ================= 主题操作 =================
-    def _default_theme(self) -> Theme:
-        theme = self.db.query(Theme).filter(Theme.name == DEFAULT_THEME).first()
-        if not theme:
-            theme = Theme(name=DEFAULT_THEME, sort_order=0)
-            self.db.add(theme)
-            self.db.commit()
-        return theme
+    def _columns(self) -> list[tuple[str, str]]:
+        if not self.source_slice:
+            return [("A", "A"), ("B", "B")]
+        return list(zip(self.source_slice.column_letters, self.source_slice.headers))
 
-    def _add_theme(self):
-        name, ok = QInputDialog.getText(self, "新建主题", "主题名称：")
-        if ok and name.strip():
-            if self.db.query(Theme).filter(Theme.name == name.strip()).first():
-                QMessageBox.warning(self, "提示", "主题名称已存在")
-                return
-            max_order = max([t.sort_order for t in self.db.query(Theme).all()] or [0])
-            self.db.add(Theme(name=name.strip(), sort_order=max_order + 1))
-            self.db.commit()
-            self._refresh_tree()
+    # ================= 选择事件 =================
+    def _on_group_selected(self, group: ProjectGroup):
+        self.current_group = group
+        self._refresh_tree()
 
-    def _delete_theme(self):
-        theme_id = self._selected_theme_id()
-        if not theme_id:
-            return
-        theme = self.db.get(Theme, theme_id)
-        if not theme:
-            return
-        if QMessageBox.question(self, "删除主题", f"确定删除主题「{theme.name}」？其下项目也会级联删除（磁盘文件不会被删除）。") != QMessageBox.StandardButton.Yes:
-            return
-        self.db.delete(theme)
-        self.db.commit()
-        self._refresh_all()
-
-    def _selected_theme_id(self) -> int | None:
-        items = self.tree.selectedItems()
-        if not items:
-            return None
-        tid = items[0].data(0, DragDropThemeTree.THEME_ROLE)
-        return tid if tid is not None else None
-
-    def _on_tree_selected(self):
-        tid = self._selected_theme_id()
-        if tid:
-            # 按主题过滤列表（简单实现：刷新列表为当前主题下项目）
-            self._refresh_list_by_theme(tid)
-
-    def _refresh_list_by_theme(self, theme_id: int):
-        theme = self.db.get(Theme, theme_id)
-        if not theme:
-            return
-        projects = [{"id": p.id, "name": p.name, "path": p.source_file_path, "status": p.status}
-                    for p in sorted(theme.projects, key=lambda x: x.id)]
-        self.list.set_projects(projects)
-
-    def _on_theme_reordered(self):
-        order = self.tree.theme_order()
-        for i, tid in enumerate(order):
-            theme = self.db.get(Theme, tid)
-            if theme and theme.sort_order != i:
-                theme.sort_order = i
-        self.db.commit()
-
-    # ================= 导入 / 打开 =================
-    def _goto_import(self):
-        self.tabs.setCurrentWidget(self.import_view)
-
-    def _import(self, path, start_row, end_row, start_col, end_col):
-        self._source_basename = os.path.basename(path)
-        self._run_import(path, start_row, end_row, start_col, end_col, read_raw=False)
-
-    def _open_project(self, project_id: int):
-        self._open_project_id(project_id)
-
-    def _open_project_id(self, project_id: int):
-        project = self.db.get(Project, project_id)
-        if not project:
-            return
+    def _on_project_selected(self, project: Project):
+        self._sync_current_chart()
+        self.current_project = project
+        self.current_chart = project.charts[0] if project.charts else None
+        self.current_group = project.group
+        project.last_opened_at = datetime.now()
         if not os.path.isfile(project.source_file_path):
             project.status = MISSING
             self.db.commit()
             self._refresh_all()
-            self._relocate(project)
+            QMessageBox.warning(self, "文件缺失",
+                                f"项目「{project.name}」的导出文件不存在。\n请在数据设置页重新导入原始数据。")
+            self.tabs.setCurrentWidget(self.import_view)
             return
-        self._current_project = project
-        project.last_opened_at = datetime.now()
         project.status = ACTIVE
         self.db.commit()
-        # 从 raw data 页重新读取（场景 2）
-        self._run_import(project.source_file_path,
-                         project.raw_start_row, project.raw_end_row,
-                         project.raw_start_col_letter, project.raw_end_col_letter,
-                         read_raw=True,
-                         series=[SeriesConfig(
-                             name=s.series_name, x_col=s.x_col_letter, y_col=s.y_col_letter,
-                             color=s.color_hex, shape=s.marker_shape, size=s.marker_size,
-                         ) for s in project.series_list],
-                         options=ChartOptions(
-                             title=project.chart_title, x_label=project.x_axis_label,
-                             y_label=project.y_axis_label, x_min=project.x_axis_min,
-                             x_max=project.x_axis_max, y_min=project.y_axis_min,
-                             y_max=project.y_axis_max, show_grid=project.show_grid,
-                         ))
+        self._refresh_all()
+        # 从导出文件的 raw data 页重新读取
+        self._run_import(project.source_file_path, project.data_start_row, project.data_end_row,
+                         project.data_start_col_letter, project.data_end_col_letter, read_raw=True)
+        self.tabs.setCurrentWidget(self.import_view)
 
-    def _run_import(self, path, start_row, end_row, start_col, end_col, read_raw=False,
-                    series=None, options=None):
+    def _on_chart_selected(self, chart: Chart):
+        self._sync_current_chart()
+        self.current_chart = chart
+        self._load_chart(chart)
+        self._refresh_tree()
+        self._refresh_chart_list()
+        self.tabs.setCurrentWidget(self.series_view)
+
+    # ================= 图表状态 =================
+    def _load_chart(self, chart: Chart):
+        series = [SeriesConfig(name=s.series_name, x_col=s.x_col_letter, y_col=s.y_col_letter,
+                               row_start=s.row_start, row_end=s.row_end, color=s.color_hex,
+                               shape=s.marker_shape, size=s.marker_size) for s in chart.series_list]
+        self.series_view.set_series(series, self._columns())
+        self.options_view.set_columns(self._columns())
+        opts = ChartOptions(
+            title=chart.chart_title, x_label=chart.x_axis_label, y_label=chart.y_axis_label,
+            x_min=chart.x_axis_min, x_max=chart.x_axis_max, y_min=chart.y_axis_min, y_max=chart.y_axis_max,
+            x_major_unit=chart.x_axis_major_unit, x_minor_unit=chart.x_axis_minor_unit,
+            y_major_unit=chart.y_axis_major_unit, y_minor_unit=chart.y_axis_minor_unit,
+            show_grid=chart.show_grid, connect_line=chart.connect_line,
+            rules=[LimitRule(x_col=l.x_col_letter, y_col=l.y_col_letter,
+                             x_start=l.x_start, x_end=l.x_end, y_min=l.y_min, y_max=l.y_max)
+                   for l in chart.limits])
+        self.options_view.set_options(opts)
+        self.options_view.chart_name.setText(chart.chart_name)
+        self._preview()
+
+    def _sync_current_chart(self):
+        """把当前图表视图中的系列/选项写回 DB（切换/导出前调用）。"""
+        if not self.current_chart or not self.current_project:
+            return
+        chart = self.current_chart
+        chart.chart_name = self.options_view.get_chart_name()
+        opts = self.options_view.get_options()
+        chart.chart_title = opts.title
+        chart.x_axis_label = opts.x_label
+        chart.y_axis_label = opts.y_label
+        chart.x_axis_min = opts.x_min
+        chart.x_axis_max = opts.x_max
+        chart.y_axis_min = opts.y_min
+        chart.y_axis_max = opts.y_max
+        chart.x_axis_major_unit = opts.x_major_unit
+        chart.x_axis_minor_unit = opts.x_minor_unit
+        chart.y_axis_major_unit = opts.y_major_unit
+        chart.y_axis_minor_unit = opts.y_minor_unit
+        chart.show_grid = opts.show_grid
+        chart.connect_line = opts.connect_line
+        # 系列：用关系集合清空 + 追加，保证内存集合同步（级联删除旧系列）
+        chart.series_list.clear()
+        self.db.flush()
+        for i, scfg in enumerate(self.series_view.get_series()):
+            chart.series_list.append(Series(series_name=scfg.name,
+                                            x_col_letter=scfg.x_col, y_col_letter=scfg.y_col,
+                                            row_start=scfg.row_start, row_end=scfg.row_end,
+                                            color_hex=scfg.color, marker_shape=scfg.shape,
+                                            marker_size=scfg.size, sort_order=i))
+        # 限值规则：清空 + 追加（X 区间 → Y 上下限）
+        chart.limits.clear()
+        self.db.flush()
+        for i, rule in enumerate(self.options_view._rules):
+            chart.limits.append(ChartLimit(x_col_letter=rule.x_col, y_col_letter=rule.y_col,
+                                           x_start=rule.x_start, x_end=rule.x_end,
+                                           y_min=rule.y_min, y_max=rule.y_max, sort_order=i))
+        self.db.commit()
+
+    def _preview(self):
+        if not self.current_chart or self.source_slice is None:
+            return
+        series = self.series_view.get_series()
+        opts = self.options_view.get_options()
+        self.preview.render(self.source_slice, series, opts)
+
+    # ================= 导入 =================
+    def _import(self, path, start_row, end_row, start_col, end_col):
+        if not self.current_project:
+            QMessageBox.information(self, "提示", "请先在左侧选择或新建一个项目（数据表）")
+            return
+        self.source_name = os.path.basename(path)
+        self._run_import(path, start_row, end_row, start_col, end_col)
+
+    def _run_import(self, path, start_row, end_row, start_col, end_col, read_raw=False):
         self.statusBar().showMessage("正在读取数据…")
         self._import_worker = ImportWorker(path, start_row, end_row, start_col, end_col, read_raw, self)
-        self._import_worker.success.connect(
-            lambda sl, s=series, o=options: self._on_import_done(sl, s, o))
+        self._import_worker.success.connect(self._on_import_done)
         self._import_worker.failed.connect(self._on_import_failed)
         self._import_worker.cancelled.connect(lambda: self.statusBar().showMessage("导入已取消"))
         self._import_worker.start()
 
-    def _on_import_done(self, sl: SheetSlice, series, options):
-        self._source_slice = sl
-        # 默认系列
-        if series is None:
-            letters = sl.column_letters
-            x = letters[0] if letters else "A"
-            y = letters[1] if len(letters) > 1 else x
-            series = [SeriesConfig(name="系列 1", x_col=x, y_col=y, color="#FF0000", shape="circle", size=8)]
-        if options is None:
-            options = ChartOptions(title=self._source_basename.rsplit(".", 1)[0], show_grid=True)
-        self._series = series
-        self._options = options
-
-        self.config_view.set_series(self._series)
-        self.options_view.set_options(self._options)
+    def _on_import_done(self, sl: SheetSlice):
+        self.source_slice = sl
         self.import_view.set_max_row(sl.row_count)
-        self._preview_from_state()
+        p = self.current_project
+        p.data_start_row = sl.start_row
+        p.data_end_row = sl.end_row
+        p.data_start_col_letter = sl.column_letters[0]
+        p.data_end_col_letter = sl.column_letters[-1]
+        self.db.commit()
+        if self.current_chart:
+            self._load_chart(self.current_chart)
+        else:
+            self.series_view.set_series([], self._columns())
+            QMessageBox.information(self, "提示", "数据已加载。请先点击「＋新建图表」创建一张图，再配置系列。")
         self.statusBar().showMessage(f"已加载 {sl.row_count:,} 行数据")
-        self.tabs.setCurrentWidget(self.config_view)
+        self.tabs.setCurrentWidget(self.series_view)
 
     def _on_import_failed(self, msg: str):
         self.statusBar().showMessage("读取失败")
         QMessageBox.critical(self, "读取失败", msg)
 
-    # ================= 预览 / 选项 =================
-    def _preview_from_state(self):
-        if not self._source_slice:
+    # ================= CRUD =================
+    def _default_group(self) -> ProjectGroup:
+        g = self.db.query(ProjectGroup).filter(ProjectGroup.name == DEFAULT_GROUP).first()
+        if not g:
+            g = ProjectGroup(name=DEFAULT_GROUP, sort_order=0)
+            self.db.add(g)
+            self.db.commit()
+        return g
+
+    def _add_group(self):
+        name, ok = QInputDialog.getText(self, "新建项目组", "项目组名称：")
+        if ok and name.strip():
+            if self.db.query(ProjectGroup).filter(ProjectGroup.name == name.strip()).first():
+                QMessageBox.warning(self, "提示", "项目组名称已存在")
+                return
+            mx = max([g.sort_order for g in self._groups()] or [0])
+            self.db.add(ProjectGroup(name=name.strip(), sort_order=mx + 1))
+            self.db.commit()
+            self._refresh_tree()
+
+    def _delete_group(self):
+        g = self.current_group
+        if not g:
+            QMessageBox.information(self, "提示", "请先在左侧选中一个项目组")
             return
-        self._series = self.config_view.get_series()
-        self._options = self.options_view.get_options()
-        self.preview.render(self._source_slice, self._series, self._options)
+        if QMessageBox.question(self, "删除项目组",
+                                f"确定删除项目组「{g.name}」及其下所有项目/图表？\n（磁盘文件不会被删除）") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.delete(g)
+        self.db.commit()
+        self.current_group = None
+        self.current_project = None
+        self.current_chart = None
+        self.source_slice = None
+        self._refresh_all()
+
+    def _add_project(self):
+        """新建项目（数据表）——加入【当前选中的项目组】，未选中则用第一个组。"""
+        groups = self._groups()
+        if not groups:
+            self._default_group()
+            groups = self._groups()
+        if self.current_group is None:
+            self.current_group = groups[0]
+        name, ok = QInputDialog.getText(
+            self, "新建项目",
+            f"项目名称（= 一个原始数据表格，将加入项目组「{self.current_group.name}」）：")
+        if not ok or not name.strip():
+            return
+        p = Project(name=name.strip(), group_id=self.current_group.id, source_file_path="",
+                    data_start_row=1, data_end_row=None,
+                    data_start_col_letter="A", data_end_col_letter=None,
+                    status=ACTIVE, last_opened_at=datetime.now())
+        self.db.add(p)
+        self.db.commit()
+        self.current_project = p
+        self.current_chart = None
+        self.source_slice = None
+        self._refresh_all()
+        self.tabs.setCurrentWidget(self.import_view)
+        self.statusBar().showMessage(f"已新建项目「{p.name}」，请到数据设置页导入原始数据")
+
+    def _delete_project(self):
+        if not self.current_project:
+            QMessageBox.information(self, "提示", "请先在左侧选中一个项目")
+            return
+        p = self.current_project
+        if QMessageBox.question(self, "删除项目",
+                                f"确定删除项目「{p.name}」？\n（磁盘文件不会被删除）") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.delete(p)
+        self.db.commit()
+        self.current_project = None
+        self.current_chart = None
+        self.source_slice = None
+        self._refresh_all()
+
+    def _add_chart(self):
+        if not self.current_project:
+            QMessageBox.information(self, "提示", "请先选择项目")
+            return
+        self._sync_current_chart()
+        n = len(self.current_project.charts) + 1
+        c = Chart(chart_name=f"图表 {n}", show_grid=True, connect_line=True, sort_order=n - 1)
+        self.current_project.charts.append(c)   # 通过关系追加，保证集合同步
+        self.db.commit()
+        self.current_chart = c
+        self._load_chart(c)
+        self._refresh_all()
+        self.tabs.setCurrentWidget(self.series_view)
+
+    def _delete_chart(self):
+        c = self.current_chart or self.chart_list.selected_chart()
+        if not c:
+            QMessageBox.information(self, "提示", "请先选中一张图表")
+            return
+        if QMessageBox.question(self, "删除图表", f"确定删除图表「{c.chart_name}」？") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.delete(c)
+        self.db.commit()
+        self.current_chart = None
+        self._refresh_all()
 
     # ================= 导出 =================
     def _export(self):
-        if not self._source_slice:
-            QMessageBox.information(self, "提示", "请先导入数据或打开项目")
+        if self.source_slice is None:
+            QMessageBox.information(self, "提示", "请先在数据设置页导入原始数据")
             return
-        if self._current_project and os.path.isfile(self._current_project.source_file_path):
-            default_path = self._current_project.source_file_path
+        self._sync_current_chart()
+        specs: list[ChartSpec] = []
+        for chart in self.current_project.charts:
+            opts = ChartOptions(
+                title=chart.chart_title, x_label=chart.x_axis_label, y_label=chart.y_axis_label,
+                x_min=chart.x_axis_min, x_max=chart.x_axis_max, y_min=chart.y_axis_min, y_max=chart.y_axis_max,
+                x_major_unit=chart.x_axis_major_unit, x_minor_unit=chart.x_axis_minor_unit,
+                y_major_unit=chart.y_axis_major_unit, y_minor_unit=chart.y_axis_minor_unit,
+                show_grid=chart.show_grid, connect_line=chart.connect_line,
+                rules=[LimitRule(x_col=l.x_col_letter, y_col=l.y_col_letter,
+                                 x_start=l.x_start, x_end=l.x_end, y_min=l.y_min, y_max=l.y_max)
+                       for l in chart.limits])
+            series = [SeriesConfig(name=s.series_name, x_col=s.x_col_letter, y_col=s.y_col_letter,
+                                   row_start=s.row_start, row_end=s.row_end, color=s.color_hex,
+                                   shape=s.marker_shape, size=s.marker_size) for s in chart.series_list]
+            specs.append(ChartSpec(chart_name=chart.chart_name, options=opts, series_list=series))
+        if not specs:
+            QMessageBox.information(self, "提示", "请先新建至少一张图表")
+            return
+
+        p = self.current_project
+        if p.source_file_path and os.path.isfile(p.source_file_path):
+            default_path = p.source_file_path
         else:
-            default_path = default_export_name(self._source_basename)
-        dlg = ExportDialog(self._source_slice, self.config_view.get_series(),
-                           self.options_view.get_options(), default_path, self)
+            default_path = default_export_name(self.source_name or p.name or "散点图")
+        dlg = ExportDialog(self.source_slice, specs, default_path, self)
         if dlg.exec() == ExportDialog.DialogCode.Accepted:
             path = dlg.result_path
-            self._persist_project(path)
+            p.source_file_path = path
+            p.status = ACTIVE
+            p.last_opened_at = datetime.now()
+            self.db.commit()
+            self._refresh_all()
             self.statusBar().showMessage(f"导出完成：{path}")
-
-    def _persist_project(self, path: str):
-        name = os.path.splitext(os.path.basename(path))[0]
-        theme = self._default_theme()
-        options = self.options_view.get_options()
-        series_cfgs = self.config_view.get_series()
-
-        if self._current_project is None:
-            project = Project(
-                name=name, theme_id=theme.id, source_file_path=path,
-                raw_start_row=1,
-                raw_end_row=self._source_slice.row_count,
-                raw_start_col_letter=self._source_slice.column_letters[0],
-                raw_end_col_letter=self._source_slice.column_letters[-1],
-                status=ACTIVE, last_opened_at=datetime.now(),
-            )
-            self.db.add(project)
-            self.db.flush()
-            self._current_project = project
-        else:
-            project = self._current_project
-            project.source_file_path = path
-            project.last_opened_at = datetime.now()
-            project.status = ACTIVE
-
-        # 图表元数据
-        project.chart_title = options.title
-        project.x_axis_label = options.x_label
-        project.y_axis_label = options.y_label
-        project.x_axis_min = options.x_min
-        project.x_axis_max = options.x_max
-        project.y_axis_min = options.y_min
-        project.y_axis_max = options.y_max
-        project.show_grid = options.show_grid
-
-        # 系列（重建）
-        for s in list(project.series_list):
-            self.db.delete(s)
-        self.db.flush()
-        for i, cfg in enumerate(series_cfgs):
-            self.db.add(Series(
-                project_id=project.id, series_name=cfg.name,
-                x_col_letter=cfg.x_col, y_col_letter=cfg.y_col,
-                color_hex=cfg.color, marker_shape=cfg.shape, marker_size=cfg.size,
-                sort_order=i,
-            ))
-        self.db.commit()
-        self._refresh_all()
-
-    def _export_image(self):
-        if not self._source_slice:
-            QMessageBox.information(self, "提示", "请先导入数据或打开项目")
-            return
-        self.tabs.setCurrentWidget(self.preview)
-        self._preview_from_state()
-        name = os.path.splitext(self._source_basename or "散点图")[0] + "_散点图.png"
-        dlg = ExportImageDialog(self.preview, name, self)
-        dlg.exec()
-
-    # ================= 批量操作（Q2） =================
-    def _on_selection_changed(self, n: int):
-        self.sel_label.setText(f"已选 {n} 个")
-
-    def _batch_export(self):
-        ids = self.list.selected_project_ids()
-        if not ids:
-            QMessageBox.information(self, "提示", "请先在列表中选中项目（Ctrl/Shift 多选）")
-            return
-        from PySide6.QtWidgets import QFileDialog
-        folder = QFileDialog.getExistingDirectory(self, "选择批量导出的目标文件夹")
-        if not folder:
-            return
-        exported = 0
-        for pid in ids:
-            p = self.db.get(Project, pid)
-            if not p or p.status != ACTIVE:
-                continue
-            try:
-                self._re_export_project(p, folder)
-                exported += 1
-            except Exception as exc:  # noqa: BLE001
-                QMessageBox.warning(self, "批量导出", f"{p.name} 导出失败：{exc}")
-        QMessageBox.information(self, "批量导出", f"完成，成功导出 {exported} 个项目到：\n{folder}")
-
-    def _re_export_project(self, project: Project, folder: str):
-        h = ExcelHandler()
-        sl = h.read_raw_data_sheet(project.source_file_path, project.raw_start_row,
-                                   project.raw_end_row, project.raw_start_col_letter,
-                                   project.raw_end_col_letter)
-        series = [SeriesConfig(name=s.series_name, x_col=s.x_col_letter, y_col=s.y_col_letter,
-                               color=s.color_hex, shape=s.marker_shape, size=s.marker_size)
-                  for s in project.series_list]
-        options = ChartOptions(title=project.chart_title, x_label=project.x_axis_label,
-                               y_label=project.y_axis_label, x_min=project.x_axis_min,
-                               x_max=project.x_axis_max, y_min=project.y_axis_min,
-                               y_max=project.y_axis_max, show_grid=project.show_grid)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target = os.path.join(folder, f"{project.name}_{stamp}.xlsx")
-        ExcelExportService().export(sl, series, options, target)
-
-    def _batch_delete(self):
-        ids = self.list.selected_project_ids()
-        if not ids:
-            QMessageBox.information(self, "提示", "请先在列表中选中项目")
-            return
-        if QMessageBox.question(self, "批量删除", f"确定删除 {len(ids)} 个项目记录吗？\n（磁盘文件不会被删除）") != QMessageBox.StandardButton.Yes:
-            return
-        for pid in ids:
-            p = self.db.get(Project, pid)
-            if p:
-                self.db.delete(p)
-        self.db.commit()
-        self._refresh_all()
-        self.statusBar().showMessage(f"已删除 {len(ids)} 个项目记录")
-
-    # ================= 重定位 / 删除（MISSING） =================
-    def _relocate(self, project: Project):
-        from PySide6.QtWidgets import QFileDialog
-        if QMessageBox.question(self, "文件缺失", f"项目「{project.name}」的导出文件不存在。\n是否重新定位到新文件？") != QMessageBox.StandardButton.Yes:
-            return
-        path, _ = QFileDialog.getOpenFileName(self, "选择导出文件", "", "Excel 文件 (*.xlsx)")
-        if not path:
-            return
-        # 校验含 raw data 页
-        from openpyxl import load_workbook
-        try:
-            wb = load_workbook(path, read_only=True)
-            if RAW_DATA_SHEET not in wb.sheetnames:
-                raise FileMissingException(f"所选文件不包含 {RAW_DATA_SHEET} 页")
-            wb.close()
-        except FileMissingException as exc:
-            QMessageBox.warning(self, "校验失败", str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(self, "校验失败", "无法打开所选文件")
-            return
-        project.source_file_path = path
-        project.status = ACTIVE
-        self.db.commit()
-        self._refresh_all()
-        self.statusBar().showMessage(f"已重新定位：{path}")
 
     # ================= 其他 =================
     def _on_recent_clicked(self, item: QListWidgetItem):
         pid = item.data(Qt.ItemDataRole.UserRole)
-        if pid is not None:
-            self._open_project_id(pid)
+        p = self.db.get(Project, pid)
+        if p:
+            self._on_project_selected(p)
 
     def _probe_async(self):
         self.statusBar().showMessage("正在后台探活文件状态…")
@@ -574,17 +513,18 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self.statusBar().showMessage("就绪")
 
-    def _about(self):
-        QMessageBox.about(
-            self, "关于",
-            "Excel 散点图生成器 — ScatterForge\n\n"
-            "Excel 文件生成器/转换器：导入原始数据 → 生成含 raw data + 原生散点图的全新 .xlsx。\n"
-            "技术栈：PySide6 · openpyxl · SQLAlchemy · ECharts"
-        )
-
     def closeEvent(self, event):
+        self._sync_current_chart()
         self.db.close()
         super().closeEvent(event)
+
+
+def _hbox(widgets):
+    from PySide6.QtWidgets import QHBoxLayout
+    h = QHBoxLayout()
+    for w in widgets:
+        h.addWidget(w)
+    return h
 
 
 def run_app() -> int:

@@ -1,26 +1,45 @@
-"""导出服务：生成全新 Excel 文件（raw data + Chart View 两页），覆盖式写入。
+"""导出服务（v3.2）：生成全新 Excel 文件，Sheet1=raw data + 每张图一个 Sheet。
 
-冻结规范第 7 章（方案 A）：
-- 内存新建 Workbook → raw data 页写切片数据 → Chart View 页插入原生散点图。
-- 写前备份 → 写 .tmp → 校验 → 替换 → 删除备份。
-- 取消/异常回滚三要素：删除临时文件、恢复备份（覆盖场景）、由调用方回滚事务。
-- 禁止修改原用户文件（本服务只写目标导出文件）。
+- Sheet1 `raw data`：原样复制用户指定范围（真实行列，保留原列位置）。
+- 之后每张图一个 Sheet（Sheet 名 = 图表名），内容为原生 ScatterChart。
+- 写前备份 → 写 .tmp.xlsx → 校验 → 替换 → 删除备份（含回滚）。
+- 禁止修改原用户文件。
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Optional
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import PatternFill
 
 from src.core.exceptions import OperationCancelledException, OperationFailedException
 from src.core.stoppable import IStoppable
-from src.services.chart_builder import ChartBuilder, ChartOptions, SeriesConfig
-from src.services.excel_handler import CHART_VIEW_SHEET, RAW_DATA_SHEET, SheetSlice
+from src.services.chart_builder import ChartBuilder, ChartOptions, SeriesConfig, check_limit_rules
+from src.services.excel_handler import RAW_DATA_SHEET, SheetSlice
+from src.models.validators import col_to_index
 
 ProgressCb = Callable[[int], None]
+_EXCEED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # 浅红
+
+
+@dataclass
+class ChartSpec:
+    """一张图表的导出规格。"""
+    chart_name: str
+    options: ChartOptions
+    series_list: list[SeriesConfig]
+
+
+def safe_sheet_name(name: str, fallback: str = "图表") -> str:
+    """Excel Sheet 名合法性：≤31 字符，去除 \\ / ? * [ ] 等非法字符。"""
+    cleaned = re.sub(r"[\\/*?:\[\]]", "_", str(name or ""))
+    cleaned = cleaned.strip()[:31]
+    return cleaned or fallback
 
 
 class ExcelExportService(IStoppable):
@@ -32,13 +51,12 @@ class ExcelExportService(IStoppable):
     def export(
         self,
         sl: SheetSlice,
-        series_list: list[SeriesConfig],
-        options: ChartOptions,
+        chart_specs: list[ChartSpec],
         target_path: str,
         progress_cb: Optional[ProgressCb] = None,
     ) -> str:
         """完整导出流程，返回最终文件路径。"""
-        wb = self.build_workbook(sl, series_list, options, progress_cb)
+        wb = self.build_workbook(sl, chart_specs, progress_cb)
         self.save_workbook(wb, target_path)
         if progress_cb:
             progress_cb(100)
@@ -47,40 +65,72 @@ class ExcelExportService(IStoppable):
     def build_workbook(
         self,
         sl: SheetSlice,
-        series_list: list[SeriesConfig],
-        options: ChartOptions,
+        chart_specs: list[ChartSpec],
         progress_cb: Optional[ProgressCb] = None,
     ) -> Workbook:
         wb = Workbook()
         ws_data = wb.active
         ws_data.title = RAW_DATA_SHEET
 
-        # 表头（保持源列位置，图表按原列字母引用）
-        for i, header in enumerate(sl.headers):
-            ws_data.cell(row=1, column=sl.start_col + i, value=header)
-
-        # 数据行（每 1000 行检查一次取消 + 上报进度）
+        # Sheet1：原样复制用户指定范围（保留原列位置），每 1000 行检查取消 + 进度
         total = max(len(sl.rows), 1)
-        for ri, row in enumerate(sl.rows):
-            if ri % 1000 == 0:
+        for i, row in enumerate(sl.rows):
+            if i % 1000 == 0:
                 if self.should_cancel():
                     raise OperationCancelledException("用户取消导出")
                 if progress_cb:
-                    progress_cb(int(ri / total * 90))
-            excel_row = ri + 2
-            for i, val in enumerate(row):
-                ws_data.cell(row=excel_row, column=sl.start_col + i, value=val)
+                    progress_cb(int(i / total * 60))
+            excel_row = sl.start_row + i
+            for j, val in enumerate(row):
+                if val is not None:
+                    ws_data.cell(row=excel_row, column=sl.start_col + j, value=val)
 
-        # 图表页
-        ws_chart = wb.create_sheet(CHART_VIEW_SHEET)
-        chart = ChartBuilder().build(ws_data, series_list, options)
-        ws_chart.add_chart(chart, "A1")
+        # 条件限值规则：超限单元格标红（浅红）+ 追加「限值规则」Sheet
+        all_rules = []
+        for spec in chart_specs:
+            all_rules.extend(spec.options.rules or [])
+        if all_rules:
+            exceeded = check_limit_rules(sl, all_rules)
+            if exceeded:
+                xi = col_to_index(all_rules[0].x_col)
+                yi = col_to_index(all_rules[0].y_col)
+                for p in exceeded:
+                    if p["kind"] == "Y":
+                        ws_data.cell(row=p["row"], column=yi).fill = _EXCEED_FILL
+                    else:
+                        ws_data.cell(row=p["row"], column=xi).fill = _EXCEED_FILL
+            ws_rules = wb.create_sheet("限值规则")
+            ws_rules.append(["X 列", "X 起始", "X 结束", "Y 列", "Y 最小", "Y 最大"])
+            for r in all_rules:
+                ws_rules.append([r.x_col, r.x_start, r.x_end, r.y_col, r.y_min, r.y_max])
+            if exceeded:
+                ws_rules.append([])
+                ws_rules.append([f"超限点数：{len(exceeded)}"])
+                ws_rules.append(["行号", "X 值", "Y 值", "类型"])
+                for p in exceeded:
+                    ws_rules.append([p["row"], p["x"], p["y"], "X 超限" if p["kind"] == "X" else "Y 超限"])
+
+        # 每张图一个 Sheet（Sheet 名去重，避免与 raw data/限值规则或彼此重名）
+        used = {RAW_DATA_SHEET, "限值规则"}
+        for idx, spec in enumerate(chart_specs):
+            if self.should_cancel():
+                raise OperationCancelledException("用户取消导出")
+            base = safe_sheet_name(spec.chart_name, f"图表{idx + 1}")
+            name, n = base, 2
+            while name in used:
+                name = f"{base[:27]}({n})"
+                n += 1
+            used.add(name)
+            ws_chart = wb.create_sheet(name)
+            chart = ChartBuilder().build(ws_data, spec.series_list, spec.options)
+            ws_chart.add_chart(chart, "A1")
+            if progress_cb:
+                progress_cb(60 + int((idx + 1) / len(chart_specs) * 30))
         return wb
 
     def save_workbook(self, workbook: Workbook, target_path: str) -> None:
-        """写前备份 → .tmp → 校验 → 替换 → 删除备份（含回滚）。"""
+        """写前备份 → .tmp.xlsx → 校验 → 替换 → 删除备份（含回滚）。"""
         backup_path: Optional[str] = None
-        # 临时文件使用 .xlsx 扩展名，保证 openpyxl 可按扩展名校验
         tmp_path = target_path + ".tmp.xlsx"
         try:
             if os.path.exists(target_path):
@@ -95,15 +145,12 @@ class ExcelExportService(IStoppable):
             if self.should_cancel():
                 raise OperationCancelledException("用户取消导出")
 
-            # 校验临时文件可被 openpyxl 正常打开
-            load_workbook(tmp_path).close()
+            load_workbook(tmp_path).close()  # 校验临时文件可打开
 
-            # 替换正式文件
             if os.path.exists(target_path):
                 os.remove(target_path)
             os.rename(tmp_path, target_path)
 
-            # 删除备份
             if backup_path and os.path.exists(backup_path):
                 os.remove(backup_path)
 
@@ -116,7 +163,6 @@ class ExcelExportService(IStoppable):
 
     @staticmethod
     def _rollback(backup_path: Optional[str], tmp_path: str, target_path: str) -> None:
-        """回滚：恢复备份、删除临时文件。"""
         try:
             if backup_path and os.path.exists(backup_path):
                 shutil.copy2(backup_path, target_path)
