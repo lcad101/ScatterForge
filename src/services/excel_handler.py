@@ -13,6 +13,17 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from openpyxl import load_workbook
+import openpyxl.worksheet._reader as _xr
+
+_original_cast = _xr._cast_number
+
+def _safe_cast_number(value):
+    """修复 openpyxl 无法处理 'inf'/'nan' 字符串的缺陷。"""
+    if isinstance(value, str) and value.lower() in ("inf", "-inf", "nan"):
+        return float(value)
+    return _original_cast(value)
+
+_xr._cast_number = _safe_cast_number
 
 from src.core.exceptions import FileMissingException, OperationCancelledException
 from src.core.stoppable import IStoppable

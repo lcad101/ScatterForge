@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         self.tree.groupSelected.connect(self._on_group_selected)
         self.tree.projectSelected.connect(self._on_project_selected)
         self.tree.chartSelected.connect(self._on_chart_selected)
+        self.tree.copyProjectRequested.connect(self._copy_project)
 
         add_project_btn = QPushButton("＋项目")
         add_project_btn.setToolTip("在选中的项目组下新建项目（数据表）")
@@ -118,8 +119,12 @@ class MainWindow(QMainWindow):
         # 中：图表列表
         self.chart_list = ChartListWidget()
         self.chart_list.chartActivated.connect(self._on_chart_selected)
+        self.chart_list.copyRequested.connect(self._copy_chart)
         add_chart_btn = QPushButton("＋新建图表")
         add_chart_btn.clicked.connect(self._add_chart)
+        copy_chart_btn = QPushButton("📋 复制图表")
+        copy_chart_btn.setToolTip("复制当前选中的图表（含全部系列和设置）")
+        copy_chart_btn.clicked.connect(self._copy_chart)
         del_chart_btn = QPushButton("🗑 删除图表")
         del_chart_btn.clicked.connect(self._delete_chart)
         mid = QWidget()
@@ -127,7 +132,7 @@ class MainWindow(QMainWindow):
         ml.setContentsMargins(4, 4, 4, 4)
         ml.addWidget(QLabel("📋 图表"))
         ml.addWidget(self.chart_list, 1)
-        ml.addLayout(_hbox([add_chart_btn, del_chart_btn]))
+        ml.addLayout(_hbox([add_chart_btn, copy_chart_btn, del_chart_btn]))
 
         # 右：标签页
         self.tabs = QTabWidget()
@@ -428,6 +433,90 @@ class MainWindow(QMainWindow):
         self.source_slice = None
         self._refresh_all()
 
+    def _copy_project(self, src_project=None):
+        """复制选中的项目及其全部图表/系列/限值规则，在同一项目组下新建一份副本。"""
+        src = src_project or self.current_project
+        if not src:
+            QMessageBox.information(self, "提示", "请先选中要复制的项目")
+            return
+        # 先同步当前编辑状态
+        self._sync_current_chart()
+
+        new_project = Project(
+            name=f"{src.name} 副本",
+            group_id=src.group_id,
+            source_file_path=src.source_file_path,  # 共享同一导出文件
+            data_start_row=src.data_start_row,
+            data_end_row=src.data_end_row,
+            data_start_col_letter=src.data_start_col_letter,
+            data_end_col_letter=src.data_end_col_letter,
+            status=src.status,
+            last_opened_at=None,
+        )
+        self.db.add(new_project)
+        self.db.flush()  # 获取 new_project.id
+
+        # 深复制全部图表及其子记录
+        for src_chart in src.charts:
+            new_chart = Chart(
+                chart_name=src_chart.chart_name,
+                chart_title=src_chart.chart_title,
+                x_axis_label=src_chart.x_axis_label,
+                y_axis_label=src_chart.y_axis_label,
+                x_axis_min=src_chart.x_axis_min,
+                x_axis_max=src_chart.x_axis_max,
+                y_axis_min=src_chart.y_axis_min,
+                y_axis_max=src_chart.y_axis_max,
+                x_axis_major_unit=src_chart.x_axis_major_unit,
+                x_axis_minor_unit=src_chart.x_axis_minor_unit,
+                y_axis_major_unit=src_chart.y_axis_major_unit,
+                y_axis_minor_unit=src_chart.y_axis_minor_unit,
+                show_grid=src_chart.show_grid,
+                connect_line=src_chart.connect_line,
+                sort_order=src_chart.sort_order,
+            )
+            new_project.charts.append(new_chart)
+            self.db.flush()  # 获取 new_chart.id
+
+            # 深复制系列
+            for s in src_chart.series_list:
+                new_chart.series_list.append(Series(
+                    series_name=s.series_name,
+                    x_col_letter=s.x_col_letter,
+                    y_col_letter=s.y_col_letter,
+                    row_start=s.row_start,
+                    row_end=s.row_end,
+                    color_hex=s.color_hex,
+                    marker_shape=s.marker_shape,
+                    marker_size=s.marker_size,
+                    sort_order=s.sort_order,
+                ))
+
+            # 深复制限值规则
+            for lim in src_chart.limits:
+                new_chart.limits.append(ChartLimit(
+                    x_col_letter=lim.x_col_letter,
+                    y_col_letter=lim.y_col_letter,
+                    x_start=lim.x_start,
+                    x_end=lim.x_end,
+                    y_min=lim.y_min,
+                    y_max=lim.y_max,
+                    sort_order=lim.sort_order,
+                ))
+
+        self.db.commit()
+        # 切换到新项目
+        self.current_group = new_project.group
+        self.current_project = new_project
+        self.current_chart = new_project.charts[0] if new_project.charts else None
+        self.source_slice = None
+        self._refresh_all()
+        self.tabs.setCurrentWidget(self.series_view)
+        self.statusBar().showMessage(
+            f"已复制项目「{src.name}」→「{new_project.name}」"
+            f"（{len(new_project.charts)} 张图表）"
+        )
+
     def _add_chart(self):
         if not self.current_project:
             QMessageBox.information(self, "提示", "请先选择项目")
@@ -441,6 +530,75 @@ class MainWindow(QMainWindow):
         self._load_chart(c)
         self._refresh_all()
         self.tabs.setCurrentWidget(self.series_view)
+
+    def _copy_chart(self, src_chart=None):
+        """复制选中的图表及其全部系列/限值规则，在同一项目下新建一张副本。"""
+        src = src_chart or self.current_chart or self.chart_list.selected_chart()
+        if not src:
+            QMessageBox.information(self, "提示", "请先选中要复制的图表")
+            return
+        # 先同步当前图表，防止数据丢失
+        self._sync_current_chart()
+        # 确保源图表数据也是最新的
+        if self.current_chart and self.current_chart.id != src.id:
+            pass  # src 不是当前编辑图表，DB 中已是最新
+        else:
+            # src 就是当前编辑图表，_sync_current_chart 已保存
+            pass
+
+        n = len(self.current_project.charts) + 1
+        new_chart = Chart(
+            chart_name=f"{src.chart_name} 副本",
+            chart_title=src.chart_title,
+            x_axis_label=src.x_axis_label,
+            y_axis_label=src.y_axis_label,
+            x_axis_min=src.x_axis_min,
+            x_axis_max=src.x_axis_max,
+            y_axis_min=src.y_axis_min,
+            y_axis_max=src.y_axis_max,
+            x_axis_major_unit=src.x_axis_major_unit,
+            x_axis_minor_unit=src.x_axis_minor_unit,
+            y_axis_major_unit=src.y_axis_major_unit,
+            y_axis_minor_unit=src.y_axis_minor_unit,
+            show_grid=src.show_grid,
+            connect_line=src.connect_line,
+            sort_order=n - 1,
+        )
+        self.current_project.charts.append(new_chart)
+        self.db.flush()  # 获取 new_chart.id
+
+        # 深复制全部系列
+        for s in src.series_list:
+            new_chart.series_list.append(Series(
+                series_name=s.series_name,
+                x_col_letter=s.x_col_letter,
+                y_col_letter=s.y_col_letter,
+                row_start=s.row_start,
+                row_end=s.row_end,
+                color_hex=s.color_hex,
+                marker_shape=s.marker_shape,
+                marker_size=s.marker_size,
+                sort_order=s.sort_order,
+            ))
+
+        # 深复制全部限值规则
+        for lim in src.limits:
+            new_chart.limits.append(ChartLimit(
+                x_col_letter=lim.x_col_letter,
+                y_col_letter=lim.y_col_letter,
+                x_start=lim.x_start,
+                x_end=lim.x_end,
+                y_min=lim.y_min,
+                y_max=lim.y_max,
+                sort_order=lim.sort_order,
+            ))
+
+        self.db.commit()
+        self.current_chart = new_chart
+        self._load_chart(new_chart)
+        self._refresh_all()
+        self.tabs.setCurrentWidget(self.series_view)
+        self.statusBar().showMessage(f"已复制图表「{src.chart_name}」→「{new_chart.chart_name}」")
 
     def _delete_chart(self):
         c = self.current_chart or self.chart_list.selected_chart()

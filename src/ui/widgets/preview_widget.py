@@ -131,8 +131,9 @@ class PreviewWidget(QWebEngineView):
         option = {
             "title": {"text": options.title or "", "left": "center", "textStyle": {"fontSize": 14}},
             "tooltip": {"trigger": "item"},
-            "legend": {"data": [s.name for s in visible_series], "bottom": 0},
-            "grid": {"left": 60, "right": 40, "top": 60, "bottom": 60},
+            "legend": {"data": [s.name for s in visible_series],
+                       "right": 10, "top": "middle", "orient": "vertical"},
+            "grid": {"left": 60, "right": 160, "top": 60, "bottom": 60},
             "xAxis": x_axis,
             "yAxis": y_axis,
             "dataZoom": [{"type": "inside"}, {"type": "slider", "bottom": 28}],
