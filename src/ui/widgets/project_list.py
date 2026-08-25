@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
 class ChartListWidget(QListWidget):
     chartActivated = Signal(object)   # Chart（双击/点击编辑）
+    chartClicked = Signal(object)     # Chart（单击选中）
     deleteRequested = Signal(object)  # Chart
     copyRequested = Signal(object)    # Chart（右键复制）
 
@@ -16,6 +17,7 @@ class ChartListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.itemDoubleClicked.connect(self._on_double)
+        self.itemClicked.connect(self._on_click)
         self.setStyleSheet("""
             QListWidget {
                 background: #ffffff;
@@ -38,18 +40,26 @@ class ChartListWidget(QListWidget):
 
     def set_charts(self, charts, sel_chart=None):
         self.clear()
-        for c in charts:
+        sel_idx = -1
+        for i, c in enumerate(charts):
             n = len(c.series_list)
             item = QListWidgetItem(f"{c.chart_name}\n{n} 个系列 · X/Y 可编辑")
             item.setData(self.ROLE_CHART, c)
-            if sel_chart is not None and sel_chart.id == c.id:
-                item.setSelected(True)
             self.addItem(item)
+            if sel_chart is not None and sel_chart.id == c.id:
+                sel_idx = i
+        if sel_idx >= 0:
+            self.setCurrentRow(sel_idx)
 
     def _on_double(self, item):
         c = item.data(self.ROLE_CHART)
         if c is not None:
             self.chartActivated.emit(c)
+
+    def _on_click(self, item):
+        c = item.data(self.ROLE_CHART)
+        if c is not None:
+            self.chartClicked.emit(c)
 
     def selected_chart(self):
         items = self.selectedItems()

@@ -28,8 +28,11 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 </head><body><div id="c"></div>
 <script>__ECHARTS__</script>
 <script>
+__TOOLTIP_FN__
+var opt = __OPTION__;
+if (typeof tooltipFn !== 'undefined') { opt.tooltip.formatter = tooltipFn; }
 var chart = echarts.init(document.getElementById('c'));
-chart.setOption(__OPTION__);
+chart.setOption(opt);
 window.addEventListener('resize', function(){ chart.resize(); });
 </script></body></html>"""
 
@@ -169,6 +172,16 @@ class PreviewWidget(QWebEngineView):
         html = _HTML_TEMPLATE
         html = html.replace("__ECHARTS__", self._echarts_js)
         html = html.replace("__OPTION__", json.dumps(option, ensure_ascii=False))
+        # tooltip formatter 作为原始 JS 函数注入（不经过 json.dumps）
+        x_label = (options.x_label or "X").replace("'", "\\'")
+        y_label = (options.y_label or "Y").replace("'", "\\'")
+        tooltip_fn = (
+            f"function tooltipFn(p){{"
+            f"return '<b>'+p.seriesName+'</b><br/>'"
+            f"+'{x_label} : '+p.value[0]"
+            f"+'<br/>{y_label} : '+p.value[1];}}"
+        )
+        html = html.replace("__TOOLTIP_FN__", tooltip_fn)
         if banner:
             html = html.replace("<div id=\"c\">", banner + '<div id="c">')
         self.setHtml(html, QUrl("about:blank"))

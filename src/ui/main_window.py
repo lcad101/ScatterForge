@@ -7,7 +7,7 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QApplication, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QApplication, QFileDialog, QInputDialog, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QSplitter, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -93,6 +93,8 @@ class MainWindow(QMainWindow):
         self.tree.projectSelected.connect(self._on_project_selected)
         self.tree.chartSelected.connect(self._on_chart_selected)
         self.tree.copyProjectRequested.connect(self._copy_project)
+        self.tree.renameGroupRequested.connect(self._rename_group)
+        self.tree.renameProjectRequested.connect(self._rename_project)
 
         add_project_btn = QPushButton("＋项目")
         add_project_btn.setToolTip("在选中的项目组下新建项目（数据表）")
@@ -119,6 +121,7 @@ class MainWindow(QMainWindow):
         # 中：图表列表
         self.chart_list = ChartListWidget()
         self.chart_list.chartActivated.connect(self._on_chart_selected)
+        self.chart_list.chartClicked.connect(self._on_chart_clicked)
         self.chart_list.copyRequested.connect(self._copy_chart)
         add_chart_btn = QPushButton("＋新建图表")
         add_chart_btn.clicked.connect(self._add_chart)
@@ -139,6 +142,8 @@ class MainWindow(QMainWindow):
         self.start_page = self._build_start_page()
         self.import_view = ImportView()
         self.import_view.applyRequested.connect(self._import)
+        self.import_view.initRequested.connect(self._init_data)
+        self.import_view.reinitRequested.connect(self._init_data)
         self.series_view = SeriesView()
         self.series_view.changed.connect(self._preview)
         self.options_view = OptionsView()
@@ -241,6 +246,22 @@ class MainWindow(QMainWindow):
         project.status = ACTIVE
         self.db.commit()
         self._refresh_all()
+        self.import_view.set_saved_path(project.source_file_path)
+        # 从保存的文件读取元数据回填信息标签
+        if os.path.isfile(project.source_file_path):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(project.source_file_path, read_only=True, data_only=True)
+                ws = wb.active
+                tr = ws.max_row or 0
+                tc = ws.max_column or 0
+                wb.close()
+                from src.models.validators import index_to_col
+                self.import_view.info_label.setText(
+                    f"文件总行数：{tr:,} · 总列数：{tc:,}"
+                    f"（最后行号 {tr}，最后列 {index_to_col(tc)}）")
+            except Exception:
+                pass
         # 从导出文件的 raw data 页重新读取
         self._run_import(project.source_file_path, project.data_start_row, project.data_end_row,
                          project.data_start_col_letter, project.data_end_col_letter, read_raw=True)
@@ -252,7 +273,13 @@ class MainWindow(QMainWindow):
         self._load_chart(chart)
         self._refresh_tree()
         self._refresh_chart_list()
-        self.tabs.setCurrentWidget(self.series_view)
+        self.tabs.setCurrentWidget(self.preview)
+
+    def _on_chart_clicked(self, chart: Chart):
+        """图表列表单击：选中图表并跳转到预览。"""
+        if self.current_chart and self.current_chart.id == chart.id:
+            return  # 已是当前图表，无需重复操作
+        self._on_chart_selected(chart)
 
     # ================= 图表状态 =================
     def _load_chart(self, chart: Chart):
@@ -337,24 +364,75 @@ class MainWindow(QMainWindow):
 
     def _on_import_done(self, sl: SheetSlice):
         self.source_slice = sl
-        self.import_view.set_max_row(sl.row_count)
-        p = self.current_project
-        p.data_start_row = sl.start_row
-        p.data_end_row = sl.end_row
-        p.data_start_col_letter = sl.column_letters[0]
-        p.data_end_col_letter = sl.column_letters[-1]
-        self.db.commit()
+        # 注意：不调用 set_max_row，避免覆盖初始化时设置的完整信息（含列数）
+        # DB 中的行列范围在 _init_data 中已设置，此处不再覆盖
         if self.current_chart:
             self._load_chart(self.current_chart)
         else:
             self.series_view.set_series([], self._columns())
-            QMessageBox.information(self, "提示", "数据已加载。请先点击「＋新建图表」创建一张图，再配置系列。")
         self.statusBar().showMessage(f"已加载 {sl.row_count:,} 行数据")
         self.tabs.setCurrentWidget(self.series_view)
 
     def _on_import_failed(self, msg: str):
         self.statusBar().showMessage("读取失败")
         QMessageBox.critical(self, "读取失败", msg)
+
+    def _init_data(self):
+        """初始化数据：选择原始文件 → 选择保存路径 → 复制 → 读取元数据。"""
+        if not self.current_project:
+            QMessageBox.information(self, "提示", "请先在左侧选择或新建一个项目")
+            return
+        # Step 1: 选择原始文件
+        src_path, _ = QFileDialog.getOpenFileName(
+            self, "选择原始 Excel 文件", "", "Excel 文件 (*.xlsx *.xlsm)")
+        if not src_path:
+            return
+        # Step 2: 选择保存路径
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "选择保存路径（将复制原始文件到此处）",
+            os.path.join(os.path.dirname(src_path),
+                         os.path.splitext(os.path.basename(src_path))[0] + "_Scatter.xlsx"),
+            "Excel 文件 (*.xlsx)")
+        if not save_path:
+            return
+        # Step 3: 复制文件
+        try:
+            import shutil
+            shutil.copy2(src_path, save_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "复制失败", f"无法复制文件：{exc}")
+            return
+        # Step 4: 读取元数据（行数、列数）
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(save_path, read_only=True, data_only=True)
+            ws = wb.active
+            total_rows = ws.max_row or 0
+            total_cols = ws.max_column or 0
+            wb.close()
+        except Exception as exc:
+            QMessageBox.critical(self, "读取失败", f"无法读取表格信息：{exc}")
+            return
+        if total_cols < 1:
+            QMessageBox.warning(self, "提示", "表格为空，无数据可读取")
+            return
+        # 计算结束列字母
+        from src.models.validators import index_to_col
+        end_col = index_to_col(total_cols)
+        # Step 5: 更新 DB
+        p = self.current_project
+        p.source_file_path = save_path
+        p.data_start_row = 1
+        p.data_end_row = total_rows
+        p.data_start_col_letter = "A"
+        p.data_end_col_letter = end_col
+        p.status = ACTIVE
+        self.db.commit()
+        # Step 6: 回填 UI
+        self.import_view.set_init_result(save_path, total_rows, total_cols, total_rows, end_col)
+        self._refresh_all()
+        self.statusBar().showMessage(
+            f"初始化完成：已复制到 {save_path}（{total_rows:,} 行 × {total_cols} 列）")
 
     # ================= CRUD =================
     def _default_group(self) -> ProjectGroup:
@@ -432,6 +510,33 @@ class MainWindow(QMainWindow):
         self.current_chart = None
         self.source_slice = None
         self._refresh_all()
+
+    def _rename_group(self, group):
+        """右键改名项目组。"""
+        new_name, ok = QInputDialog.getText(self, "改名项目组", "新名称：", text=group.name)
+        if not ok or not new_name.strip():
+            return
+        if new_name.strip() == group.name:
+            return
+        if self.db.query(ProjectGroup).filter(ProjectGroup.name == new_name.strip()).first():
+            QMessageBox.warning(self, "提示", "项目组名称已存在")
+            return
+        group.name = new_name.strip()
+        self.db.commit()
+        self._refresh_all()
+        self.statusBar().showMessage(f"已改名项目组→「{group.name}」")
+
+    def _rename_project(self, project):
+        """右键改名项目。"""
+        new_name, ok = QInputDialog.getText(self, "改名项目", "新名称：", text=project.name)
+        if not ok or not new_name.strip():
+            return
+        if new_name.strip() == project.name:
+            return
+        project.name = new_name.strip()
+        self.db.commit()
+        self._refresh_all()
+        self.statusBar().showMessage(f"已改名项目→「{project.name}」")
 
     def _copy_project(self, src_project=None):
         """复制选中的项目及其全部图表/系列/限值规则，在同一项目组下新建一份副本。"""
@@ -650,7 +755,11 @@ class MainWindow(QMainWindow):
             p.last_opened_at = datetime.now()
             self.db.commit()
             self._refresh_all()
-            self.statusBar().showMessage(f"导出完成：{path}")
+            # 导出成功后自动切换数据源到导出文件的 raw data 页
+            self._run_import(path, p.data_start_row, p.data_end_row,
+                             p.data_start_col_letter, p.data_end_col_letter, read_raw=True)
+            self.import_view.set_saved_path(path)
+            self.statusBar().showMessage(f"导出完成：{path}（数据源已切换）")
 
     # ================= 其他 =================
     def _on_recent_clicked(self, item: QListWidgetItem):
