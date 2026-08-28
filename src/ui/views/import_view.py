@@ -111,6 +111,13 @@ class ImportView(QWidget):
         self.end_row.setValue(end_row)
         self.end_col.setText(end_col)
 
+    def set_row_col_range(self, start_row: int, end_row: int | None, start_col: str, end_col: str | None):
+        """恢复项目保存的行列范围到 UI 控件。"""
+        self.start_row.setValue(start_row)
+        self.end_row.setValue(end_row or 0)
+        self.start_col.setText(start_col)
+        self.end_col.setText(end_col or "")
+
     def set_saved_path(self, path):
         self._saved_path = path
         self.saved_path_edit.setText(path)

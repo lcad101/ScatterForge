@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Excel 散点图生成器 — ScatterForge")
+        self.setMinimumSize(1024, 600)
         self.resize(1280, 800)
 
         self.db = SessionLocal()
@@ -155,12 +156,18 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.series_view, "系列配置")
         self.tabs.addTab(self.options_view, "图表选项")
         self.tabs.addTab(self.preview, "图表预览")
+        self.tabs.currentChanged.connect(lambda idx: self._preview())
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left)
         splitter.addWidget(mid)
         splitter.addWidget(self.tabs)
         splitter.setSizes([260, 300, 720])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
+        left.setMinimumWidth(160)
+        mid.setMinimumWidth(140)
         self.setCentralWidget(splitter)
 
         menubar = self.menuBar()
@@ -227,7 +234,8 @@ class MainWindow(QMainWindow):
     # ================= 选择事件 =================
     def _on_group_selected(self, group: ProjectGroup):
         self.current_group = group
-        self._refresh_tree()
+        # 不传 current_project，避免树重建时 setCurrentItem 跳到项目
+        self.tree.set_data(self._groups(), self.current_group, None, None)
 
     def _on_project_selected(self, project: Project):
         self._sync_current_chart()
@@ -247,6 +255,11 @@ class MainWindow(QMainWindow):
         self.db.commit()
         self._refresh_all()
         self.import_view.set_saved_path(project.source_file_path)
+        # 恢复该项目保存的行列范围到 ImportView UI
+        self.import_view.set_row_col_range(
+            project.data_start_row, project.data_end_row,
+            project.data_start_col_letter, project.data_end_col_letter)
+        has_raw_sheet = False
         # 从保存的文件读取元数据回填信息标签
         if os.path.isfile(project.source_file_path):
             try:
@@ -255,6 +268,7 @@ class MainWindow(QMainWindow):
                 ws = wb.active
                 tr = ws.max_row or 0
                 tc = ws.max_column or 0
+                has_raw_sheet = RAW_DATA_SHEET in wb.sheetnames
                 wb.close()
                 from src.models.validators import index_to_col
                 self.import_view.info_label.setText(
@@ -262,10 +276,9 @@ class MainWindow(QMainWindow):
                     f"（最后行号 {tr}，最后列 {index_to_col(tc)}）")
             except Exception:
                 pass
-        # 从导出文件的 raw data 页重新读取
+        # 智能选择读取 Sheet：已导出的文件读 raw data，否则读原始活动 Sheet
         self._run_import(project.source_file_path, project.data_start_row, project.data_end_row,
-                         project.data_start_col_letter, project.data_end_col_letter, read_raw=True)
-        self.tabs.setCurrentWidget(self.import_view)
+                         project.data_start_col_letter, project.data_end_col_letter, read_raw=has_raw_sheet)
 
     def _on_chart_selected(self, chart: Chart):
         self._sync_current_chart()
@@ -273,7 +286,6 @@ class MainWindow(QMainWindow):
         self._load_chart(chart)
         self._refresh_tree()
         self._refresh_chart_list()
-        self.tabs.setCurrentWidget(self.preview)
 
     def _on_chart_clicked(self, chart: Chart):
         """图表列表单击：选中图表并跳转到预览。"""
@@ -351,6 +363,13 @@ class MainWindow(QMainWindow):
         if not self.current_project:
             QMessageBox.information(self, "提示", "请先在左侧选择或新建一个项目（数据表）")
             return
+        # 将用户配置的行列范围持久化到当前项目的 DB 记录
+        p = self.current_project
+        p.data_start_row = start_row
+        p.data_end_row = end_row
+        p.data_start_col_letter = start_col
+        p.data_end_col_letter = end_col
+        self.db.commit()
         self.source_name = os.path.basename(path)
         self._run_import(path, start_row, end_row, start_col, end_col)
 

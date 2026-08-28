@@ -101,6 +101,38 @@ class ProjectTreeWidget(QTreeWidget):
                     any_expanded = True
             if any_expanded:
                 gitem.setExpanded(True)
+        # 第三阶段：选中最深层级项目功能信息高亮和焦点
+        found = False
+        if sel_chart is not None:
+            for gi, pi3 in groups_info:
+                for pi3i, _ in pi3:
+                    for ci in range(pi3i.childCount()):
+                        ci2 = pi3i.child(ci)
+                        ch = ci2.data(0, self.ROLE_CHART)
+                        if ch is not None and ch.id == sel_chart.id:
+                            self.setCurrentItem(ci2)
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+        if not found and sel_project is not None:
+            for gi, pi2 in groups_info:
+                for pi2i, _ in pi2:
+                    proj = pi2i.data(0, self.ROLE_PROJECT)
+                    if proj is not None and proj.id == sel_project.id:
+                        self.setCurrentItem(pi2i)
+                        found = True
+                        break
+                if found:
+                    break
+        if not found and sel_group is not None:
+            for gi, _ in groups_info:
+                grp = gi.data(0, self.ROLE_GROUP)
+                if grp is not None and grp.id == sel_group.id:
+                    self.setCurrentItem(gi)
+                    break
 
     def _on_click(self, item, _col):
         g = item.data(0, self.ROLE_GROUP)
